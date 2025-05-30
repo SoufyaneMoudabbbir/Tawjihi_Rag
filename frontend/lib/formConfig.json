@@ -1,0 +1,256 @@
+{
+  "title": "Educational Path Questionnaire",
+  "description": "Help us understand your background and goals to provide personalized educational guidance",
+  "steps": [
+    {
+      "id": "personal",
+      "title": "Personal Information",
+      "description": "Tell us about yourself",
+      "icon": "User",
+      "fields": [
+        {
+          "name": "fullName",
+          "label": "Full Name",
+          "type": "text",
+          "required": true,
+          "placeholder": "Enter your full name",
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "age",
+          "label": "Age",
+          "type": "number",
+          "required": true,
+          "placeholder": "Your age",
+          "min": 15,
+          "max": 35,
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "city",
+          "label": "City",
+          "type": "select",
+          "required": true,
+          "placeholder": "Select your city",
+          "options": [
+            "Casablanca",
+            "Rabat",
+            "Marrakech",
+            "Fès",
+            "Tangier",
+            "Agadir",
+            "Meknès",
+            "Oujda",
+            "Kénitra",
+            "Tétouan",
+            "Other"
+          ],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "gender",
+          "label": "Gender",
+          "type": "select",
+          "required": false,
+          "placeholder": "Select gender",
+          "options": ["Male", "Female", "Prefer not to say"],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "languages",
+          "label": "Languages Spoken",
+          "type": "checkbox",
+          "required": true,
+          "options": ["Arabic", "French", "English", "Spanish", "German", "Other"],
+          "gridCols": "md:col-span-2",
+          "minSelections": 1
+        }
+      ]
+    },
+    {
+      "id": "academic",
+      "title": "Academic Background",
+      "description": "Your educational journey so far",
+      "icon": "GraduationCap",
+      "fields": [
+        {
+          "name": "educationLevel",
+          "label": "Current Education Level",
+          "type": "select",
+          "required": true,
+          "placeholder": "Select your education level",
+          "options": ["Baccalauréat", "License (Bachelor's)", "Master's", "Doctorate", "Professional Diploma"],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "academicStream",
+          "label": "Academic Stream/Field",
+          "type": "select",
+          "required": true,
+          "placeholder": "Select your academic stream",
+          "options": [
+            "Sciences",
+            "Mathematics",
+            "Literature",
+            "Economics",
+            "Technology",
+            "Arts",
+            "Social Sciences",
+            "Engineering",
+            "Medicine",
+            "Business"
+          ],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "gpa",
+          "label": "GPA/Average Grade",
+          "type": "text",
+          "required": false,
+          "placeholder": "e.g., 15.5/20 or 3.5/4.0",
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "institution",
+          "label": "Institution Name",
+          "type": "text",
+          "required": false,
+          "placeholder": "Current or last institution",
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "achievements",
+          "label": "Academic Achievements",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "Describe any awards, honors, or notable achievements...",
+          "gridCols": "md:col-span-2",
+          "rows": 4
+        }
+      ]
+    },
+    {
+      "id": "interests",
+      "title": "Interests & Goals",
+      "description": "What drives your passion?",
+      "icon": "Target",
+      "fields": [
+        {
+          "name": "careerInterests",
+          "label": "Career Interests",
+          "type": "checkbox",
+          "required": true,
+          "options": [
+            "Technology",
+            "Healthcare",
+            "Education",
+            "Business",
+            "Engineering",
+            "Arts & Design",
+            "Law",
+            "Finance",
+            "Research",
+            "Media",
+            "Tourism",
+            "Agriculture",
+            "Environment",
+            "Social Work",
+            "Other"
+          ],
+          "gridCols": "md:col-span-2",
+          "minSelections": 1,
+          "maxSelections": 5
+        },
+        {
+          "name": "careerGoals",
+          "label": "Long-term Career Goals",
+          "type": "textarea",
+          "required": true,
+          "placeholder": "Describe your career aspirations and what you hope to achieve...",
+          "gridCols": "md:col-span-2",
+          "rows": 4
+        },
+        {
+          "name": "workEnvironment",
+          "label": "Preferred Work Environment",
+          "type": "select",
+          "required": false,
+          "placeholder": "Select your preference",
+          "options": [
+            "Corporate/Office",
+            "Startup",
+            "Government",
+            "NGO/Non-profit",
+            "Freelance/Self-employed",
+            "Academic/Research",
+            "International Organization"
+          ],
+          "gridCols": "md:col-span-2"
+        }
+      ]
+    },
+    {
+      "id": "preferences",
+      "title": "Study Preferences",
+      "description": "Your study and career preferences",
+      "icon": "Settings",
+      "fields": [
+        {
+          "name": "studyAbroad",
+          "label": "Study Abroad Interest",
+          "type": "radio",
+          "required": true,
+          "options": ["Very interested", "Somewhat interested", "Not interested", "Undecided"],
+          "gridCols": "md:col-span-2"
+        },
+        {
+          "name": "studyDestinations",
+          "label": "Preferred Study Destinations",
+          "type": "checkbox",
+          "required": false,
+          "dependsOn": {
+            "field": "studyAbroad",
+            "values": ["Very interested", "Somewhat interested", "Undecided"]
+          },
+          "options": [
+            "France",
+            "Canada",
+            "Germany",
+            "USA",
+            "UK",
+            "Spain",
+            "Belgium",
+            "Netherlands",
+            "Turkey",
+            "UAE",
+            "Other"
+          ],
+          "gridCols": "md:col-span-2"
+        },
+        {
+          "name": "financialConsiderations",
+          "label": "Financial Considerations",
+          "type": "checkbox",
+          "required": true,
+          "options": [
+            "Need scholarship/financial aid",
+            "Family can support education costs",
+            "Willing to work while studying",
+            "Open to education loans"
+          ],
+          "gridCols": "md:col-span-2",
+          "minSelections": 1
+        },
+        {
+          "name": "additionalComments",
+          "label": "Additional Comments",
+          "type": "textarea",
+          "required": false,
+          "placeholder": "Any additional information you'd like to share...",
+          "gridCols": "md:col-span-2",
+          "rows": 4
+        }
+      ]
+    }
+  ]
+}
