@@ -1,0 +1,34 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+rag_env_310/
+*.env
+
+# ---- Virtual environments ----
+venv/
+env/
+
+# ---- Node/Next.js ----
+node_modules/
+.next/
+out/
+
+# ---- Environment variables ----
+.env
+.env.local
+.env.*.local
+
+# ---- Logs ----
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ---- Editor folders ----
+.vscode/
+.idea/
+
+# ---- Others ----
+*.swp
+.DS_Store
