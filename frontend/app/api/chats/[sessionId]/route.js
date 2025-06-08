@@ -3,7 +3,7 @@ import { openDb } from "@/lib/db"
 
 export async function GET(request, { params }) {
   try {
-    const sessionId = params.sessionId
+    const { sessionId } = await params
     const db = await openDb()
 
     // Get session details
@@ -41,25 +41,6 @@ export async function GET(request, { params }) {
   }
 }
 
-export async function PATCH(request, { params }) {
-  try {
-    const sessionId = params.sessionId
-    const { title } = await request.json()
-
-    if (!title) {
-      return NextResponse.json({ error: "Title required" }, { status: 400 })
-    }
-
-    const db = await openDb()
-
-    await db.run("UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?", [title, sessionId])
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error("Error updating chat session:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
-  }
-}
 
 export async function DELETE(request, { params }) {
   try {

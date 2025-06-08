@@ -63,6 +63,21 @@ export async function GET(request) {
     }
 
     const db = await openDb()
+    
+    // Force table creation
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS user_responses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        responses TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
+    // Create index
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_user_responses_user_id ON user_responses(user_id)`)
+
     const response = await db.get("SELECT responses, updated_at FROM user_responses WHERE user_id = ?", [userId])
 
     if (!response) {

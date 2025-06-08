@@ -3,7 +3,8 @@ import { openDb } from "@/lib/db"
 
 export async function POST(request, { params }) {
   try {
-    const sessionId = params.sessionId
+    const { sessionId } = await params
+
     const { message } = await request.json()
 
     if (!message || !message.content) {

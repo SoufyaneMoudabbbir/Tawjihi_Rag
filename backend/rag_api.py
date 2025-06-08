@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FastAPI Enhanced RAG Chatbot with Streaming Support
-Modified to support real-time streaming responses
+FastAPI Educational RAG Chatbot with Multi-Course Support
+Enhanced for college student learning with course-specific materials
 """
 
 import os
@@ -12,6 +12,7 @@ import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import json
+import sqlite3
 from datetime import datetime
 from typing import Optional, Dict, List, AsyncGenerator
 from pydantic import BaseModel
@@ -22,6 +23,7 @@ import uvicorn
 import logging
 import asyncio
 import httpx
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +32,9 @@ logger = logging.getLogger(__name__)
 # Pydantic models for request/response
 class QuestionRequest(BaseModel):
     question: str
-    stream: bool = True  # Add streaming option
+    course_id: Optional[int] = None
+    user_id: str
+    stream: bool = True
 
 class ChatResponse(BaseModel):
     response: str
@@ -38,45 +42,136 @@ class ChatResponse(BaseModel):
     confidence: str
     avg_score: float
     top_score: float
+    course_name: Optional[str] = None
     timestamp: str
 
 class HealthResponse(BaseModel):
     status: str
     model_loaded: bool
-    documents_count: int
-    index_status: str
+    courses_loaded: int
+    total_documents: int
 
-# Enhanced RAG class with streaming support
-class EnhancedTawjihRAG:
-    def __init__(self, deepseek_api_key):
-        """Initialize enhanced RAG system"""
+# Enhanced Educational RAG class
+class EducationalRAG:
+    def __init__(self, deepseek_api_key, database_path):
+        """Initialize educational RAG system"""
         self.api_key = deepseek_api_key
+        self.database_path = database_path
         self.embedding_model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-        self.documents = []
-        self.embeddings = None
-        self.index = None
         
+        # Course-specific storage
+        self.course_documents = {}  # course_id -> list of documents
+        self.course_embeddings = {}  # course_id -> embeddings array
+        self.course_indexes = {}    # course_id -> faiss index
+        self.course_info = {}       # course_id -> course metadata
+        
+        # Initialize database connection
+        self.init_database()
+        
+    def init_database(self):
+        """Initialize database connection"""
+        try:
+            self.conn = sqlite3.connect(self.database_path, check_same_thread=False)
+            self.conn.row_factory = sqlite3.Row
+            logger.info("Database connection established")
+        except Exception as e:
+            logger.error(f"Database connection failed: {e}")
+            self.conn = None
+    
+    def get_course_info(self, course_id):
+        """Get course information from database"""
+        if not self.conn:
+            return None
+            
+        try:
+            cursor = self.conn.execute(
+                "SELECT * FROM courses WHERE id = ?", (course_id,)
+            )
+            return cursor.fetchone()
+        except Exception as e:
+            logger.error(f"Error fetching course info: {e}")
+            return None
+    
+    def get_course_files(self, course_id):
+        """Get course file paths from database"""
+        if not self.conn:
+            return []
+            
+        try:
+            cursor = self.conn.execute(
+                "SELECT file_path FROM course_files WHERE course_id = ?", (course_id,)
+            )
+            return [row['file_path'] for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Error fetching course files: {e}")
+            return []
+    
+    def load_course_materials(self, course_id):
+        """Load and process course materials"""
+        if course_id in self.course_documents:
+            logger.info(f"Course {course_id} already loaded")
+            return True
+            
+        # Get course info
+        course_info = self.get_course_info(course_id)
+        if not course_info:
+            logger.warning(f"Course {course_id} not found")
+            return False
+            
+        # Get course files
+        file_paths = self.get_course_files(course_id)
+        if not file_paths:
+            logger.warning(f"No files found for course {course_id}")
+            return False
+        
+        logger.info(f"Loading {len(file_paths)} files for course {course_id}")
+        
+        # Store course info
+        self.course_info[course_id] = dict(course_info)
+        
+        # Process all files for this course
+        all_documents = []
+        for file_path in file_paths:
+            if os.path.exists(file_path):
+                try:
+                    documents = self.load_document(file_path)
+                    all_documents.extend(documents)
+                    logger.info(f"Loaded {len(documents)} chunks from {file_path}")
+                except Exception as e:
+                    logger.error(f"Error loading {file_path}: {e}")
+        
+        if not all_documents:
+            logger.warning(f"No documents loaded for course {course_id}")
+            return False
+            
+        # Store documents and build index
+        self.course_documents[course_id] = all_documents
+        self.build_course_index(course_id)
+        
+        logger.info(f"Successfully loaded course {course_id} with {len(all_documents)} document chunks")
+        return True
+    
     def load_document(self, file_path):
-        """Load and process document"""
-        logger.info("Loading document...")
-        
-        with open(file_path, 'r', encoding='utf-8') as f:
-            text = f.read()
-        
-        # Enhanced text cleaning
-        text = self.clean_text(text)
-        
-        # Split into chunks
-        chunks = self.split_text(text, chunk_size=700, overlap=100)
-        self.documents = chunks
-        
-        logger.info(f"Created {len(chunks)} document chunks")
-        self.build_index()
-        
+        """Load and process a single document"""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                text = f.read()
+            
+            # Enhanced text cleaning
+            text = self.clean_text(text)
+            
+            # Split into chunks
+            chunks = self.split_text(text, chunk_size=700, overlap=100)
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Error loading document {file_path}: {e}")
+            return []
+    
     def clean_text(self, text):
-        """Enhanced text cleaning"""
-        # Remove non-French characters
-        text = re.sub(r'[ⵏⴳⵜⵜⵓⵃⵙⵓ\u2D30-\u2D7F\u0600-\u06FF]+', '', text)
+        """Enhanced text cleaning for educational content"""
+        # Remove non-useful characters but preserve educational formatting
+        text = re.sub(r'[^\w\s\.\,\!\?\:\;\(\)\-\+\=\%\$\#\@\&\*\/\\\[\]\{\}\|]', '', text)
         
         # Clean up spacing and formatting
         text = re.sub(r'\s+', ' ', text)
@@ -90,7 +185,7 @@ class EnhancedTawjihRAG:
         return text.strip()
         
     def split_text(self, text, chunk_size=700, overlap=100):
-        """Improved text splitting"""
+        """Improved text splitting for educational content"""
         chunks = []
         start = 0
         
@@ -108,11 +203,11 @@ class EnhancedTawjihRAG:
                     chunk = text[start:start + best_cut + 1]
                     end = start + best_cut + 1
                 else:
-                    # Fallback to newline
-                    last_newline = chunk.rfind('\n')
-                    if last_newline > start + chunk_size // 2:
-                        chunk = text[start:start + last_newline]
-                        end = start + last_newline
+                    # Fallback to paragraph break
+                    last_paragraph = chunk.rfind('\n\n')
+                    if last_paragraph > start + chunk_size // 2:
+                        chunk = text[start:start + last_paragraph]
+                        end = start + last_paragraph
             
             if len(chunk.strip()) > 50:
                 chunks.append(chunk.strip())
@@ -121,26 +216,52 @@ class EnhancedTawjihRAG:
         
         return chunks
     
-    def build_index(self):
-        """Build FAISS vector index"""
-        logger.info("Building vector index...")
+    def build_course_index(self, course_id):
+        """Build FAISS vector index for a specific course"""
+        if course_id not in self.course_documents:
+            logger.error(f"No documents found for course {course_id}")
+            return False
+            
+        logger.info(f"Building vector index for course {course_id}...")
         
         # Generate embeddings
-        self.embeddings = self.embedding_model.encode(self.documents, show_progress_bar=True)
+        documents = self.course_documents[course_id]
+        embeddings = self.embedding_model.encode(documents, show_progress_bar=True)
         
         # Create FAISS index
-        dimension = self.embeddings.shape[1]
-        self.index = faiss.IndexFlatIP(dimension)
+        dimension = embeddings.shape[1]
+        index = faiss.IndexFlatIP(dimension)
         
         # Normalize embeddings for cosine similarity
-        faiss.normalize_L2(self.embeddings)
-        self.index.add(self.embeddings.astype('float32'))
+        faiss.normalize_L2(embeddings)
+        index.add(embeddings.astype('float32'))
         
-        logger.info("Index built successfully!")
+        # Store embeddings and index
+        self.course_embeddings[course_id] = embeddings
+        self.course_indexes[course_id] = index
+        
+        logger.info(f"Index built successfully for course {course_id}!")
+        return True
     
-    def search(self, query, k=5):
-        """Search for relevant documents with better scoring"""
-        if not self.index:
+    def search(self, query, course_id=None, k=5):
+        """Search for relevant documents"""
+        if course_id and course_id not in self.course_indexes:
+            # Try to load course materials
+            if not self.load_course_materials(course_id):
+                return []
+        
+        # Determine which index to search
+        if course_id and course_id in self.course_indexes:
+            # Search specific course
+            index = self.course_indexes[course_id]
+            documents = self.course_documents[course_id]
+        elif len(self.course_indexes) > 0:
+            # Search all courses or first available course
+            course_id = list(self.course_indexes.keys())[0]
+            index = self.course_indexes[course_id]
+            documents = self.course_documents[course_id]
+        else:
+            # No courses loaded
             return []
         
         # Encode query
@@ -148,20 +269,21 @@ class EnhancedTawjihRAG:
         faiss.normalize_L2(query_embedding)
         
         # Search
-        scores, indices = self.index.search(query_embedding.astype('float32'), k)
+        scores, indices = index.search(query_embedding.astype('float32'), k)
         
         results = []
         for score, idx in zip(scores[0], indices[0]):
-            if idx < len(self.documents):
+            if idx < len(documents):
                 # Add keyword matching bonus
-                keyword_bonus = self.calculate_keyword_bonus(query, self.documents[idx])
+                keyword_bonus = self.calculate_keyword_bonus(query, documents[idx])
                 adjusted_score = float(score) + keyword_bonus
                 
                 results.append({
-                    'text': self.documents[idx],
+                    'text': documents[idx],
                     'score': adjusted_score,
                     'original_score': float(score),
-                    'keyword_bonus': keyword_bonus
+                    'keyword_bonus': keyword_bonus,
+                    'course_id': course_id
                 })
         
         # Re-sort by adjusted score
@@ -169,27 +291,28 @@ class EnhancedTawjihRAG:
         return results
     
     def calculate_keyword_bonus(self, query, text):
-        """Calculate keyword matching bonus"""
+        """Calculate keyword matching bonus for educational content"""
         query_words = set(re.findall(r'\b\w+\b', query.lower()))
         text_words = set(re.findall(r'\b\w+\b', text.lower()))
         
-        # Important keywords get higher weight
-        important_keywords = {
-            'médecine', 'ingénieur', 'encg', 'ensa', 'université', 'institut',
-            'condition', 'accès', 'inscription', 'formation', 'école'
+        # Educational keywords get higher weight
+        educational_keywords = {
+            'concept', 'theory', 'principle', 'formula', 'equation', 'definition',
+            'example', 'problem', 'solution', 'method', 'process', 'analysis',
+            'study', 'learn', 'understand', 'explain', 'calculate', 'derive'
         }
         
         bonus = 0
         for word in query_words:
             if word in text_words:
-                if word in important_keywords:
-                    bonus += 0.1  # Higher bonus for important words
+                if word in educational_keywords:
+                    bonus += 0.15  # Higher bonus for educational terms
                 else:
                     bonus += 0.05
         
         return bonus
     
-    async def generate_response_stream(self, query, search_results) -> AsyncGenerator[str, None]:
+    async def generate_response_stream(self, query, search_results, course_id=None) -> AsyncGenerator[str, None]:
         """Generate streaming response using DeepSeek API"""
         # Prepare context from search results
         context_parts = []
@@ -198,30 +321,52 @@ class EnhancedTawjihRAG:
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # Enhanced system prompt
-        system_prompt = """Tu es un conseiller d'orientation spécialisé dans le système éducatif marocain. 
+        # Get course context
+        course_context = ""
+        if course_id and course_id in self.course_info:
+            course = self.course_info[course_id]
+            course_context = f"Course: {course['name']}"
+            if course.get('professor'):
+                course_context += f" (Prof. {course['professor']})"
+        
+        # Educational system prompt
+        system_prompt = f"""You are an AI tutor specializing in helping college students learn. 
 
-Règles importantes:
-- Réponds UNIQUEMENT en français
-- Si l'utilisateur dit juste "salut", "bonjour", "hi" ou une salutation simple, réponds par une salutation amicale et demande-lui comment tu peux l'aider avec son orientation
-- Base-toi uniquement sur les informations fournies pour répondre aux vraies questions d'orientation
-- Structure ta réponse de manière claire et organisée
-- Mentionne les conditions d'accès, procédures et contacts quand disponibles
-- Si l'information n'est pas dans le contexte, dis-le clairement
-- Sois encourageant et pratique dans tes conseils
-- N'invente pas d'informations qui ne sont pas dans les sources
-- ne donne pas les liens des sitwebs
+{course_context}
+
+Your role:
+- Explain concepts clearly and thoroughly
+- Break down complex topics into understandable parts
+- Provide examples and analogies when helpful
+- Create practice problems when requested
+- Help with assignments and homework
+- Encourage learning and build confidence
+
+Guidelines:
+- Always respond in the same language as the student's question
+- Use the provided course materials as your primary source
+- If information isn't in the materials, clearly state this
+- Be encouraging and supportive
+- Ask follow-up questions to check understanding
+- Suggest study strategies when appropriate
+- For math/science: show step-by-step solutions
+- For essays/writing: provide structured guidance
+
+Response style:
+- Clear and conversational
+- Well-organized with headers when needed
+- Include examples where helpful
+- End with a question to continue learning
 """
         
         # Enhanced user prompt
-        user_prompt = f"""Question de l'étudiant: {query}
+        user_prompt = f"""Student Question: {query}
 
-Informations trouvées dans le guide d'orientation:
+Course Materials:
 {context}
 
-Instructions spéciales:
-- Si la question est juste une salutation (salut, bonjour, hi, hello), réponds par une salutation et demande comment tu peux aider avec l'orientation scolaire
-- Sinon, réponds de manière structurée en aidant l'étudiant avec des informations précises basées uniquement sur le contexte fourni"""
+Please provide a helpful, educational response based on the course materials above. If the question is about a specific concept, explain it thoroughly with examples. If it's asking for help with a problem, provide step-by-step guidance.
+"""
         
         # Use httpx for async streaming
         headers = {
@@ -236,8 +381,8 @@ Instructions spéciales:
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.7,
-            "max_tokens": 1200,
-            "stream": True  # Enable streaming
+            "max_tokens": 1500,
+            "stream": True
         }
         
         async with httpx.AsyncClient() as client:
@@ -253,7 +398,7 @@ Instructions spéciales:
                     
                     async for line in response.aiter_lines():
                         if line.startswith('data: '):
-                            json_str = line[6:]  # Remove 'data: ' prefix
+                            json_str = line[6:]
                             
                             if json_str == '[DONE]':
                                 break
@@ -269,43 +414,45 @@ Instructions spéciales:
                                 
             except httpx.HTTPStatusError as e:
                 logger.error(f"API Error: {e.response.status_code} - {e.response.text}")
-                yield self.fallback_response(search_results)
+                yield self.get_fallback_response(search_results, course_id)
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
-                yield self.fallback_response(search_results)
+                yield self.get_fallback_response(search_results, course_id)
     
-    def generate_response(self, query, search_results):
-        """Non-streaming response generation (fallback)"""
-        # Prepare context from search results
+    def generate_response(self, query, search_results, course_id=None):
+        """Non-streaming response generation"""
+        # Similar to streaming but returns complete response
         context_parts = []
         for i, result in enumerate(search_results[:3], 1):
             context_parts.append(f"Source {i} (Score: {result['score']:.2f}):\n{result['text']}")
         
         context = "\n\n---\n\n".join(context_parts)
         
-        # System and user prompts (same as streaming version)
-        system_prompt = """Tu es un conseiller d'orientation spécialisé dans le système éducatif marocain. 
-
-Règles importantes:
-- Réponds UNIQUEMENT en français
-- Si l'utilisateur dit juste "salut", "bonjour", "hi" ou une salutation simple, réponds par une salutation amicale et demande-lui comment tu peux l'aider avec son orientation
-- Base-toi uniquement sur les informations fournies pour répondre aux vraies questions d'orientation
-- Structure ta réponse de manière claire et organisée
-- Mentionne les conditions d'accès, procédures et contacts quand disponibles
-- Si l'information n'est pas dans le contexte, dis-le clairement
-- Sois encourageant et pratique dans tes conseils
-- N'invente pas d'informations qui ne sont pas dans les sources"""
+        # Get course context
+        course_context = ""
+        if course_id and course_id in self.course_info:
+            course = self.course_info[course_id]
+            course_context = f"Course: {course['name']}"
+            if course.get('professor'):
+                course_context += f" (Prof. {course['professor']})"
         
-        user_prompt = f"""Question de l'étudiant: {query}
+        system_prompt = f"""You are an AI tutor for college students. {course_context}
+        
+Help students learn by:
+- Explaining concepts clearly
+- Providing examples and practice problems
+- Being encouraging and supportive
+- Using course materials as primary source
+- Responding in the same language as the question
+"""
+        
+        user_prompt = f"""Student Question: {query}
 
-Informations trouvées dans le guide d'orientation:
+Course Materials:
 {context}
 
-Instructions spéciales:
-- Si la question est juste une salutation (salut, bonjour, hi, hello), réponds par une salutation et demande comment tu peux aider avec l'orientation scolaire
-- Sinon, réponds de manière structurée en aidant l'étudiant avec des informations précises basées uniquement sur le contexte fourni"""
+Provide a helpful educational response using the course materials."""
         
-        # Call DeepSeek API
         try:
             headers = {
                 'Authorization': f'Bearer {self.api_key}',
@@ -319,7 +466,7 @@ Instructions spéciales:
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1200
+                "max_tokens": 1500
             }
             
             response = requests.post(
@@ -334,124 +481,156 @@ Instructions spéciales:
                 return result['choices'][0]['message']['content']
             else:
                 logger.error(f"API Error: {response.status_code} - {response.text}")
-                return self.fallback_response(search_results)
+                return self.get_fallback_response(search_results, course_id)
                 
         except Exception as e:
             logger.error(f"Error: {e}")
-            return self.fallback_response(search_results)
+            return self.get_fallback_response(search_results, course_id)
     
-    def fallback_response(self, search_results):
-        """Enhanced fallback response"""
+    def get_fallback_response(self, search_results, course_id=None):
+        """Enhanced fallback response for educational context"""
         if not search_results:
-            return "❌ Désolé, je n'ai pas trouvé d'informations pertinentes pour votre question. Essayez de reformuler avec des mots-clés différents."
+            return "I don't have information about that topic in the course materials. Could you rephrase your question or ask about a different concept from your coursework?"
         
-        response = "📚 **Informations trouvées dans le guide d'orientation:**\n\n"
+        course_name = ""
+        if course_id and course_id in self.course_info:
+            course_name = self.course_info[course_id]['name']
+            
+        response = f"📚 **Information from {course_name if course_name else 'your course materials'}:**\n\n"
         
-        for i, result in enumerate(search_results[:3], 1):
+        for i, result in enumerate(search_results[:2], 1):
             text = result['text']
-            # Truncate intelligently
-            if len(text) > 250:
-                # Try to cut at sentence end
-                cut_pos = text.rfind('.', 0, 250)
-                if cut_pos > 100:
+            if len(text) > 300:
+                cut_pos = text.rfind('.', 0, 300)
+                if cut_pos > 150:
                     text = text[:cut_pos + 1]
                 else:
-                    text = text[:250] + "..."
+                    text = text[:300] + "..."
             
-            response += f"**{i}.** {text}\n\n"
+            response += f"**Source {i}:** {text}\n\n"
         
-        response += "💡 **Conseil:** Pour une information plus précise, contactez directement l'institution qui vous intéresse."
+        response += "💡 **For better help:** Try asking more specific questions about concepts, formulas, or problems you're working on."
         return response
     
-    async def chat_stream(self, question):
+    def track_learning_progress(self, user_id, course_id, question, response_quality):
+        """Track learning progress in database"""
+        if not self.conn:
+            return
+            
+        try:
+            # Extract topics from question (simple keyword extraction)
+            topics = self.extract_topics(question)
+            
+            # Insert progress record
+            self.conn.execute("""
+                INSERT INTO learning_progress 
+                (user_id, course_id, activity_type, topic_covered, questions_asked, session_duration)
+                VALUES (?, ?, 'chat_question', ?, 1, 1)
+            """, (user_id, course_id, ', '.join(topics) if topics else None))
+            
+            self.conn.commit()
+            
+        except Exception as e:
+            logger.error(f"Error tracking progress: {e}")
+    
+    def extract_topics(self, text):
+        """Simple topic extraction from question text"""
+        # This is a basic implementation - you could use more sophisticated NLP
+        educational_terms = [
+            'equation', 'formula', 'theorem', 'concept', 'theory', 'principle',
+            'definition', 'example', 'problem', 'solution', 'analysis', 'method'
+        ]
+        
+        words = re.findall(r'\b\w+\b', text.lower())
+        topics = [word for word in words if word in educational_terms]
+        return topics[:3]  # Return max 3 topics
+    
+    async def chat_stream(self, question, course_id=None, user_id=None):
         """Streaming chat function"""
         # Search for relevant documents
-        search_results = self.search(question, k=10)
+        search_results = self.search(question, course_id, k=8)
         
-        # Calculate confidence based on scores
+        # Calculate confidence
         avg_score = np.mean([r['score'] for r in search_results]) if search_results else 0
         confidence = "High" if avg_score > 0.7 else "Medium" if avg_score > 0.4 else "Low"
         
-        # Metadata to send before streaming
+        # Get course name
+        course_name = None
+        if course_id and course_id in self.course_info:
+            course_name = self.course_info[course_id]['name']
+        
+        # Metadata
         metadata = {
             'sources_count': len(search_results),
             'confidence': confidence,
             'avg_score': float(avg_score),
             'top_score': float(search_results[0]['score']) if search_results else 0,
+            'course_name': course_name,
             'timestamp': datetime.now().isoformat()
         }
         
-        # First, yield the metadata as a special message
+        # Yield metadata first
         yield f"data: {json.dumps({'type': 'metadata', 'data': metadata})}\n\n"
         
-        # Then stream the response
-        async for chunk in self.generate_response_stream(question, search_results):
+        # Stream the response
+        async for chunk in self.generate_response_stream(question, search_results, course_id):
             yield f"data: {json.dumps({'type': 'content', 'data': chunk})}\n\n"
+        
+        # Track progress
+        if user_id and course_id:
+            self.track_learning_progress(user_id, course_id, question, confidence)
         
         # Send done signal
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
     
-    def chat(self, question):
+    def chat(self, question, course_id=None, user_id=None):
         """Non-streaming chat function"""
         # Search for relevant documents
-        search_results = self.search(question, k=6)
+        search_results = self.search(question, course_id, k=6)
         
         # Generate response
-        response = self.generate_response(question, search_results)
+        response = self.generate_response(question, search_results, course_id)
         
-        # Calculate confidence based on scores
+        # Calculate confidence
         avg_score = np.mean([r['score'] for r in search_results]) if search_results else 0
         confidence = "High" if avg_score > 0.7 else "Medium" if avg_score > 0.4 else "Low"
+        
+        # Get course name
+        course_name = None
+        if course_id and course_id in self.course_info:
+            course_name = self.course_info[course_id]['name']
+        
+        # Track progress
+        if user_id and course_id:
+            self.track_learning_progress(user_id, course_id, question, confidence)
         
         return {
             'response': response,
             'sources_count': len(search_results),
             'confidence': confidence,
             'avg_score': float(avg_score),
-            'top_score': float(search_results[0]['score']) if search_results else 0
+            'top_score': float(search_results[0]['score']) if search_results else 0,
+            'course_name': course_name
         }
-    
-    def save_conversation(self, question, response, filename="conversation_log.json"):
-        """Save conversation for later analysis"""
-        log_entry = {
-            'timestamp': datetime.now().isoformat(),
-            'question': question,
-            'response': response.get('response', ''),
-            'confidence': response.get('confidence', ''),
-            'sources_count': response.get('sources_count', 0)
-        }
-        
-        # Load existing log or create new one
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                conversations = json.load(f)
-        except FileNotFoundError:
-            conversations = []
-        
-        conversations.append(log_entry)
-        
-        # Save updated log
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(conversations, f, ensure_ascii=False, indent=2)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Tawjih RAG Chatbot API",
-    description="API for Moroccan Higher Education Orientation Chatbot with Streaming Support",
+    title="Educational RAG Chatbot API",
+    description="Multi-course AI tutor for college students with streaming support",
     version="2.0.0"
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # Global chatbot instance
-chatbot: Optional[EnhancedTawjihRAG] = None
+chatbot: Optional[EducationalRAG] = None
 
 @app.on_event("startup")
 async def startup_event():
@@ -459,21 +638,13 @@ async def startup_event():
     global chatbot
     
     # Configuration
-    API_KEY = "sk-c6d95fab838d450eac64cb68c223d7ef"
-    DOCUMENT_PATH = r"D:\DIRASSA\3_eme_annee\S6\DL\PFM\RAG\PDF\french_output.txt"
+    API_KEY = "sk-2777026d7e5a4682be3c46afb6575ea2"  # Your DeepSeek API key
+    DATABASE_PATH = "../frontend/database.sqlite"  # Path to your frontend database
     
     try:
-        # Check if document exists
-        if not os.path.exists(DOCUMENT_PATH):
-            logger.error(f"Document {DOCUMENT_PATH} not found!")
-            raise FileNotFoundError(f"Document {DOCUMENT_PATH} not found!")
-        
         # Initialize chatbot
-        logger.info("Initializing Enhanced Tawjih RAG Chatbot...")
-        chatbot = EnhancedTawjihRAG(API_KEY)
-        
-        # Load document
-        chatbot.load_document(DOCUMENT_PATH)
+        logger.info("Initializing Educational RAG Chatbot...")
+        chatbot = EducationalRAG(API_KEY, DATABASE_PATH)
         logger.info("Chatbot initialized successfully!")
         
     except Exception as e:
@@ -484,12 +655,13 @@ async def startup_event():
 async def root():
     """Root endpoint"""
     return {
-        "message": "Tawjih RAG Chatbot API",
+        "message": "Educational RAG Chatbot API",
         "status": "active",
         "endpoints": {
             "chat": "/chat",
             "chat_stream": "/chat/stream",
             "health": "/health",
+            "courses": "/courses",
             "docs": "/docs"
         }
     }
@@ -499,24 +671,19 @@ async def health_check():
     """Health check endpoint"""
     global chatbot
     
+    courses_loaded = len(chatbot.course_indexes) if chatbot else 0
+    total_docs = sum(len(docs) for docs in chatbot.course_documents.values()) if chatbot else 0
+    
     return HealthResponse(
         status="healthy" if chatbot else "unhealthy",
         model_loaded=chatbot is not None,
-        documents_count=len(chatbot.documents) if chatbot else 0,
-        index_status="ready" if chatbot and chatbot.index else "not_ready"
+        courses_loaded=courses_loaded,
+        total_documents=total_docs
     )
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: QuestionRequest):
-    """
-    Non-streaming chat endpoint
-    
-    Args:
-        request: QuestionRequest containing the question
-        
-    Returns:
-        ChatResponse with the complete answer and metadata
-    """
+    """Non-streaming chat endpoint"""
     global chatbot
     
     if not chatbot:
@@ -533,10 +700,7 @@ async def chat(request: QuestionRequest):
     
     try:
         # Get response from chatbot
-        result = chatbot.chat(request.question)
-        
-        # Save conversation
-        chatbot.save_conversation(request.question, result)
+        result = chatbot.chat(request.question, request.course_id, request.user_id)
         
         # Return response
         return ChatResponse(
@@ -545,6 +709,7 @@ async def chat(request: QuestionRequest):
             confidence=result['confidence'],
             avg_score=result['avg_score'],
             top_score=result['top_score'],
+            course_name=result.get('course_name'),
             timestamp=datetime.now().isoformat()
         )
         
@@ -557,15 +722,7 @@ async def chat(request: QuestionRequest):
 
 @app.post("/chat/stream")
 async def chat_stream(request: QuestionRequest):
-    """
-    Streaming chat endpoint - returns Server-Sent Events
-    
-    Args:
-        request: QuestionRequest containing the question
-        
-    Returns:
-        StreamingResponse with SSE data
-    """
+    """Streaming chat endpoint"""
     global chatbot
     
     if not chatbot:
@@ -582,7 +739,7 @@ async def chat_stream(request: QuestionRequest):
     
     async def generate():
         try:
-            async for chunk in chatbot.chat_stream(request.question):
+            async for chunk in chatbot.chat_stream(request.question, request.course_id, request.user_id):
                 yield chunk
         except Exception as e:
             logger.error(f"Streaming error: {e}")
@@ -593,28 +750,84 @@ async def chat_stream(request: QuestionRequest):
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",  # Disable Nginx buffering
+            "X-Accel-Buffering": "no",
         }
     )
 
+@app.get("/courses/{course_id}/load")
+async def load_course(course_id: int):
+    """Manually load a specific course"""
+    global chatbot
+    
+    if not chatbot:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chatbot not initialized"
+        )
+    
+    try:
+        success = chatbot.load_course_materials(course_id)
+        if success:
+            course_info = chatbot.course_info.get(course_id, {})
+            return {
+                "success": True,
+                "course_id": course_id,
+                "course_name": course_info.get('name', 'Unknown'),
+                "documents_loaded": len(chatbot.course_documents.get(course_id, [])),
+                "message": f"Course {course_id} loaded successfully"
+            }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Could not load course {course_id}"
+            )
+    except Exception as e:
+        logger.error(f"Error loading course {course_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error loading course: {str(e)}"
+        )
+
+@app.get("/courses/loaded")
+async def get_loaded_courses():
+    """Get list of currently loaded courses"""
+    global chatbot
+    
+    if not chatbot:
+        return {"courses": []}
+    
+    loaded_courses = []
+    for course_id, course_info in chatbot.course_info.items():
+        loaded_courses.append({
+            "course_id": course_id,
+            "name": course_info.get('name', 'Unknown'),
+            "documents_count": len(chatbot.course_documents.get(course_id, [])),
+            "professor": course_info.get('professor'),
+            "semester": course_info.get('semester')
+        })
+    
+    return {"courses": loaded_courses}
+
 @app.get("/examples", response_model=Dict[str, List[str]])
 async def get_examples():
-    """Get example questions"""
+    """Get example questions for students"""
     return {
         "examples": [
-            "Quelles sont les conditions pour étudier la médecine ?",
-            "Comment s'inscrire à l'ENCG de Tanger ?",
-            "Instituts de technologie avec bac Sciences Math",
-            "Frais d'inscription université Hassan II",
-            "Salut, je cherche une orientation",
-            "Bonjour, j'ai besoin d'aide"
+            "Explain the concept of photosynthesis",
+            "Help me solve this calculus problem",
+            "What are the key themes in this literature?",
+            "Create practice questions for my upcoming exam",
+            "Summarize today's lecture material",
+            "I don't understand this chemistry equation",
+            "Generate a study plan for this course",
+            "What are the main points I should remember?"
         ]
     }
 
 if __name__ == "__main__":
     # Run the API
     uvicorn.run(
-        "main:app",  # Change "main" to your filename if different
+        "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

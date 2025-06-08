@@ -1,6 +1,6 @@
 {
-  "title": "Educational Path Questionnaire",
-  "description": "Help us understand your background and goals to provide personalized educational guidance",
+  "title": "Student Learning Profile",
+  "description": "Help us understand your academic background and learning preferences to provide personalized educational support",
   "steps": [
     {
       "id": "personal",
@@ -22,46 +22,33 @@
           "type": "number",
           "required": true,
           "placeholder": "Your age",
-          "min": 15,
-          "max": 35,
+          "min": 17,
+          "max": 30,
           "gridCols": "md:col-span-1"
         },
         {
-          "name": "city",
-          "label": "City",
+          "name": "university",
+          "label": "University/Institution",
+          "type": "text",
+          "required": true,
+          "placeholder": "Your university or college name",
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "studentLevel",
+          "label": "Student Level",
           "type": "select",
           "required": true,
-          "placeholder": "Select your city",
-          "options": [
-            "Casablanca",
-            "Rabat",
-            "Marrakech",
-            "Fès",
-            "Tangier",
-            "Agadir",
-            "Meknès",
-            "Oujda",
-            "Kénitra",
-            "Tétouan",
-            "Other"
-          ],
-          "gridCols": "md:col-span-1"
-        },
-        {
-          "name": "gender",
-          "label": "Gender",
-          "type": "select",
-          "required": false,
-          "placeholder": "Select gender",
-          "options": ["Male", "Female", "Prefer not to say"],
+          "placeholder": "Select your level",
+          "options": ["Undergraduate - Year 1", "Undergraduate - Year 2", "Undergraduate - Year 3", "Undergraduate - Year 4", "Graduate - Master's", "Graduate - PhD", "Professional Studies"],
           "gridCols": "md:col-span-1"
         },
         {
           "name": "languages",
-          "label": "Languages Spoken",
+          "label": "Preferred Learning Languages",
           "type": "checkbox",
           "required": true,
-          "options": ["Arabic", "French", "English", "Spanish", "German", "Other"],
+          "options": ["English", "French", "Arabic", "Spanish", "German", "Other"],
           "gridCols": "md:col-span-2",
           "minSelections": 1
         }
@@ -70,120 +57,138 @@
     {
       "id": "academic",
       "title": "Academic Background",
-      "description": "Your educational journey so far",
+      "description": "Your field of study and current courses",
       "icon": "GraduationCap",
       "fields": [
         {
-          "name": "educationLevel",
-          "label": "Current Education Level",
+          "name": "majorField",
+          "label": "Major Field of Study",
           "type": "select",
           "required": true,
-          "placeholder": "Select your education level",
-          "options": ["Baccalauréat", "License (Bachelor's)", "Master's", "Doctorate", "Professional Diploma"],
-          "gridCols": "md:col-span-1"
-        },
-        {
-          "name": "academicStream",
-          "label": "Academic Stream/Field",
-          "type": "select",
-          "required": true,
-          "placeholder": "Select your academic stream",
+          "placeholder": "Select your major",
           "options": [
-            "Sciences",
-            "Mathematics",
-            "Literature",
-            "Economics",
-            "Technology",
-            "Arts",
-            "Social Sciences",
+            "Computer Science",
             "Engineering",
+            "Mathematics",
+            "Physics",
+            "Chemistry",
+            "Biology",
             "Medicine",
-            "Business"
+            "Business Administration",
+            "Economics",
+            "Psychology",
+            "Literature",
+            "History",
+            "Political Science",
+            "Law",
+            "Architecture",
+            "Art & Design",
+            "Other"
           ],
           "gridCols": "md:col-span-1"
         },
         {
           "name": "gpa",
-          "label": "GPA/Average Grade",
+          "label": "Current GPA/Average",
           "type": "text",
           "required": false,
-          "placeholder": "e.g., 15.5/20 or 3.5/4.0",
+          "placeholder": "e.g., 3.5/4.0 or 15/20",
           "gridCols": "md:col-span-1"
         },
         {
-          "name": "institution",
-          "label": "Institution Name",
-          "type": "text",
-          "required": false,
-          "placeholder": "Current or last institution",
-          "gridCols": "md:col-span-1"
-        },
-        {
-          "name": "achievements",
-          "label": "Academic Achievements",
+          "name": "currentCourses",
+          "label": "Current Courses (This Semester)",
           "type": "textarea",
-          "required": false,
-          "placeholder": "Describe any awards, honors, or notable achievements...",
+          "required": true,
+          "placeholder": "List your current courses, one per line...\ne.g., Data Structures and Algorithms\nCalculus II\nPhysics I",
           "gridCols": "md:col-span-2",
           "rows": 4
+        },
+        {
+          "name": "strugglingSubjects",
+          "label": "Subjects You Find Challenging",
+          "type": "checkbox",
+          "required": false,
+          "options": [
+            "Mathematics",
+            "Programming",
+            "Physics",
+            "Chemistry",
+            "Statistics",
+            "Writing",
+            "Research Methods",
+            "Theory-heavy subjects",
+            "Practical applications",
+            "Group projects",
+            "None"
+          ],
+          "gridCols": "md:col-span-2"
         }
       ]
     },
     {
-      "id": "interests",
-      "title": "Interests & Goals",
-      "description": "What drives your passion?",
+      "id": "learning",
+      "title": "Learning Preferences",
+      "description": "How do you learn best?",
       "icon": "Target",
       "fields": [
         {
-          "name": "careerInterests",
-          "label": "Career Interests",
+          "name": "learningStyle",
+          "label": "Preferred Learning Style",
           "type": "checkbox",
           "required": true,
           "options": [
-            "Technology",
-            "Healthcare",
-            "Education",
-            "Business",
-            "Engineering",
-            "Arts & Design",
-            "Law",
-            "Finance",
-            "Research",
-            "Media",
-            "Tourism",
-            "Agriculture",
-            "Environment",
-            "Social Work",
-            "Other"
+            "Visual (diagrams, charts, images)",
+            "Auditory (explanations, discussions)",
+            "Reading/Writing (notes, summaries)",
+            "Kinesthetic (hands-on, practice)",
+            "Interactive (Q&A, quizzes)",
+            "Step-by-step tutorials",
+            "Real-world examples"
           ],
           "gridCols": "md:col-span-2",
           "minSelections": 1,
-          "maxSelections": 5
+          "maxSelections": 4
         },
         {
-          "name": "careerGoals",
-          "label": "Long-term Career Goals",
-          "type": "textarea",
+          "name": "studyGoals",
+          "label": "Primary Study Goals",
+          "type": "checkbox",
           "required": true,
-          "placeholder": "Describe your career aspirations and what you hope to achieve...",
+          "options": [
+            "Understand course concepts deeply",
+            "Prepare for exams",
+            "Complete assignments successfully",
+            "Improve problem-solving skills",
+            "Connect theory to practice",
+            "Build study schedules",
+            "Review and reinforce learning",
+            "Prepare for job interviews"
+          ],
           "gridCols": "md:col-span-2",
-          "rows": 4
+          "minSelections": 1
         },
         {
-          "name": "workEnvironment",
-          "label": "Preferred Work Environment",
-          "type": "select",
+          "name": "difficultyLevel",
+          "label": "Preferred Explanation Level",
+          "type": "radio",
+          "required": true,
+          "options": ["Beginner (simple explanations)", "Intermediate (balanced detail)", "Advanced (technical depth)", "Adaptive (adjust based on topic)"],
+          "gridCols": "md:col-span-2"
+        },
+        {
+          "name": "interactiveFeatures",
+          "label": "Desired Interactive Features",
+          "type": "checkbox",
           "required": false,
-          "placeholder": "Select your preference",
           "options": [
-            "Corporate/Office",
-            "Startup",
-            "Government",
-            "NGO/Non-profit",
-            "Freelance/Self-employed",
-            "Academic/Research",
-            "International Organization"
+            "Practice quizzes",
+            "Problem-solving exercises",
+            "Study schedule creation",
+            "Progress tracking",
+            "Concept summaries",
+            "Flashcard generation",
+            "Study reminders"
           ],
           "gridCols": "md:col-span-2"
         }
@@ -192,61 +197,71 @@
     {
       "id": "preferences",
       "title": "Study Preferences",
-      "description": "Your study and career preferences",
+      "description": "Customize your learning experience",
       "icon": "Settings",
       "fields": [
         {
-          "name": "studyAbroad",
-          "label": "Study Abroad Interest",
-          "type": "radio",
-          "required": true,
-          "options": ["Very interested", "Somewhat interested", "Not interested", "Undecided"],
-          "gridCols": "md:col-span-2"
-        },
-        {
-          "name": "studyDestinations",
-          "label": "Preferred Study Destinations",
+          "name": "studySchedule",
+          "label": "Preferred Study Times",
           "type": "checkbox",
           "required": false,
-          "dependsOn": {
-            "field": "studyAbroad",
-            "values": ["Very interested", "Somewhat interested", "Undecided"]
-          },
           "options": [
-            "France",
-            "Canada",
-            "Germany",
-            "USA",
-            "UK",
-            "Spain",
-            "Belgium",
-            "Netherlands",
-            "Turkey",
-            "UAE",
-            "Other"
+            "Early morning (6-9 AM)",
+            "Morning (9-12 PM)",
+            "Afternoon (12-6 PM)",
+            "Evening (6-9 PM)",
+            "Night (9 PM-12 AM)",
+            "Late night (12-6 AM)",
+            "Flexible/No preference"
           ],
           "gridCols": "md:col-span-2"
         },
         {
-          "name": "financialConsiderations",
-          "label": "Financial Considerations",
-          "type": "checkbox",
-          "required": true,
-          "options": [
-            "Need scholarship/financial aid",
-            "Family can support education costs",
-            "Willing to work while studying",
-            "Open to education loans"
-          ],
-          "gridCols": "md:col-span-2",
-          "minSelections": 1
+          "name": "sessionLength",
+          "label": "Preferred Study Session Length",
+          "type": "radio",
+          "required": false,
+          "options": ["Short (15-30 minutes)", "Medium (30-60 minutes)", "Long (1-2 hours)", "Very long (2+ hours)", "Varies by topic"],
+          "gridCols": "md:col-span-2"
         },
         {
-          "name": "additionalComments",
-          "label": "Additional Comments",
+          "name": "reminderFrequency",
+          "label": "Study Reminder Frequency",
+          "type": "select",
+          "required": false,
+          "placeholder": "Select frequency",
+          "options": [
+            "Daily",
+            "Every 2 days",
+            "Every 3 days",
+            "Weekly",
+            "Before exams only",
+            "No reminders"
+          ],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "examPreparation",
+          "label": "Exam Preparation Style",
+          "type": "select",
+          "required": false,
+          "placeholder": "Select style",
+          "options": [
+            "Intensive cramming",
+            "Gradual review",
+            "Practice-focused",
+            "Theory-focused",
+            "Mixed approach",
+            "No preference"
+          ],
+          "gridCols": "md:col-span-1"
+        },
+        {
+          "name": "additionalNotes",
+          "label": "Additional Learning Preferences",
           "type": "textarea",
           "required": false,
-          "placeholder": "Any additional information you'd like to share...",
+          "placeholder": "Any specific learning needs, accessibility requirements, or other preferences you'd like to share...",
           "gridCols": "md:col-span-2",
           "rows": 4
         }
