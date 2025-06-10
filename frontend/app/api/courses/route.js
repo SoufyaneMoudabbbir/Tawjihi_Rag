@@ -97,6 +97,26 @@ export async function POST(request) {
 
       // Update course file count
       await db.run("UPDATE courses SET file_count = ? WHERE id = ?", [fileCount, courseId])
+      if (fileCount > 0) {
+        try {
+            const response = await fetch(`http://localhost:8000/courses/${courseId}/load`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+            })
+            
+            if (response.ok) {
+            const result = await response.json()
+            console.log(`Course ${courseId} materials processed:`, result)
+            } else {
+            console.error(`Failed to process course ${courseId} materials`)
+            }
+        } catch (error) {
+            console.error('Error triggering PDF processing:', error)
+            // Don't fail the course creation if backend is down
+        }
+        }
     }
 
     return NextResponse.json({ 

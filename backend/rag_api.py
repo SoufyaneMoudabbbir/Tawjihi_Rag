@@ -4,7 +4,7 @@
 FastAPI Educational RAG Chatbot with Multi-Course Support
 Enhanced for college student learning with course-specific materials
 """
-
+import PyPDF2
 import os
 import re
 import requests
@@ -34,6 +34,7 @@ class QuestionRequest(BaseModel):
     question: str
     course_id: Optional[int] = None
     user_id: str
+    user_profile: Optional[Dict] = None
     stream: bool = True
 
 class ChatResponse(BaseModel):
@@ -152,17 +153,44 @@ class EducationalRAG:
         return True
     
     def load_document(self, file_path):
-        """Load and process a single document"""
+        """Load and process a single document - handles PDFs and text files"""
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                text = f.read()
+            file_ext = Path(file_path).suffix.lower()
+            
+            if file_ext == '.pdf':
+                # Handle PDF files
+                text = ""
+                with open(file_path, 'rb') as file:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    num_pages = len(pdf_reader.pages)
+                    
+                    for page_num in range(num_pages):
+                        page = pdf_reader.pages[page_num]
+                        text += page.extract_text() + "\n\n"
+                
+                logger.info(f"Extracted text from {num_pages} pages in PDF: {file_path}")
+                
+            elif file_ext in ['.txt', '.md']:
+                # Handle text files
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    text = f.read()
+            else:
+                logger.warning(f"Unsupported file type: {file_ext}")
+                return []
             
             # Enhanced text cleaning
             text = self.clean_text(text)
             
             # Split into chunks
             chunks = self.split_text(text, chunk_size=700, overlap=100)
-            return chunks
+            
+            # Add metadata to chunks
+            enhanced_chunks = []
+            for i, chunk in enumerate(chunks):
+                enhanced_chunk = f"[Source: {Path(file_path).name}, Part {i+1}/{len(chunks)}]\n{chunk}"
+                enhanced_chunks.append(enhanced_chunk)
+            
+            return enhanced_chunks
             
         except Exception as e:
             logger.error(f"Error loading document {file_path}: {e}")
@@ -312,7 +340,7 @@ class EducationalRAG:
         
         return bonus
     
-    async def generate_response_stream(self, query, search_results, course_id=None) -> AsyncGenerator[str, None]:
+    async def generate_response_stream(self, query, search_results, course_id=None, user_profile=None) -> AsyncGenerator[str, None]:
         """Generate streaming response using DeepSeek API"""
         # Prepare context from search results
         context_parts = []
@@ -328,36 +356,60 @@ class EducationalRAG:
             course_context = f"Course: {course['name']}"
             if course.get('professor'):
                 course_context += f" (Prof. {course['professor']})"
+                
+        
         
         # Educational system prompt
-        system_prompt = f"""You are an AI tutor specializing in helping college students learn. 
+        # Build personalized prompt
+        if user_profile:
+            academic_level = user_profile.get('academicLevel', 'undergraduate')
+            learning_style = user_profile.get('learningStyle', 'visual')
+            difficulty_pref = user_profile.get('difficultyPreference', 'moderate')
+            major_field = user_profile.get('majorField', 'general studies')
+            language_pref = user_profile.get('preferredLanguage', 'English')
+            
+            system_prompt = f"""You are an AI tutor specializing in helping {academic_level} students studying {major_field}.
 
-{course_context}
+        {course_context}
 
-Your role:
-- Explain concepts clearly and thoroughly
-- Break down complex topics into understandable parts
-- Provide examples and analogies when helpful
-- Create practice problems when requested
-- Help with assignments and homework
-- Encourage learning and build confidence
+        Student Learning Profile:
+        - Learning Style: {learning_style} learner
+        - Preferred Difficulty: {difficulty_pref}
+        - Academic Background: {user_profile.get('educationBackground', 'general')}
+        - Career Goals: {user_profile.get('careerGoals', 'academic success')}
 
-Guidelines:
-- Always respond in the same language as the student's question
-- Use the provided course materials as your primary source
-- If information isn't in the materials, clearly state this
-- Be encouraging and supportive
-- Ask follow-up questions to check understanding
-- Suggest study strategies when appropriate
-- For math/science: show step-by-step solutions
-- For essays/writing: provide structured guidance
+        Your personalized teaching approach:
+        {f'- VISUAL: Use metaphors, describe diagrams, break down visually' if learning_style == 'visual' else ''}
+        {f'- AUDITORY: Explain as if speaking, use verbal patterns' if learning_style == 'auditory' else ''}
+        {f'- KINESTHETIC: Give hands-on examples, practical applications' if learning_style == 'kinesthetic' else ''}
+        {f'- READING/WRITING: Provide structured notes, clear outlines' if learning_style == 'reading' else ''}
 
-Response style:
-- Clear and conversational
-- Well-organized with headers when needed
-- Include examples where helpful
-- End with a question to continue learning
-"""
+        Your role:
+        - Explain concepts at {difficulty_pref} difficulty level
+        - Use examples from {major_field} when possible
+        - Break down complex topics for {academic_level} level
+        - Provide practice problems appropriate for their level
+        - Create exercises matching their learning style
+        - Help with assignments and homework
+        - Encourage learning and build confidence
+
+        Guidelines:
+        - Always respond primarily in {language_pref}
+        - Use the provided course materials as your primary source
+        - If information isn't in the materials, clearly state this
+        - Be encouraging and supportive
+        - Ask follow-up questions to check understanding
+        - Suggest study strategies for {learning_style} learners
+        - For math/science: show step-by-step solutions
+        - For essays/writing: provide structured guidance
+
+        Response style:
+        - Adapt complexity to {academic_level} level
+        - Use {difficulty_pref} difficulty explanations
+        - Well-organized with headers when needed
+        - Include examples matching their learning style
+        - End with a question to continue learning
+        """
         
         # Enhanced user prompt
         user_prompt = f"""Student Question: {query}
@@ -419,7 +471,8 @@ Please provide a helpful, educational response based on the course materials abo
                 logger.error(f"Streaming error: {e}")
                 yield self.get_fallback_response(search_results, course_id)
     
-    def generate_response(self, query, search_results, course_id=None):
+    def generate_response(self, query, search_results, course_id=None, user_profile=None):
+
         """Non-streaming response generation"""
         # Similar to streaming but returns complete response
         context_parts = []
@@ -436,15 +489,46 @@ Please provide a helpful, educational response based on the course materials abo
             if course.get('professor'):
                 course_context += f" (Prof. {course['professor']})"
         
-        system_prompt = f"""You are an AI tutor for college students. {course_context}
-        
-Help students learn by:
-- Explaining concepts clearly
-- Providing examples and practice problems
-- Being encouraging and supportive
-- Using course materials as primary source
-- Responding in the same language as the question
-"""
+        if user_profile:
+            academic_level = user_profile.get('academicLevel', 'undergraduate')
+            learning_style = user_profile.get('learningStyle', 'visual')
+            difficulty_pref = user_profile.get('difficultyPreference', 'moderate')
+            major_field = user_profile.get('majorField', 'general studies')
+            language_pref = user_profile.get('preferredLanguage', 'English')
+            
+            system_prompt = f"""You are an AI tutor for a {academic_level} student studying {major_field}. {course_context}
+
+        Student Profile:
+        - Learning Style: {learning_style} learner
+        - Preferred Difficulty: {difficulty_pref}
+        - Academic Background: {user_profile.get('educationBackground', 'general')}
+        - Language Preference: {language_pref}
+
+        Adapt your teaching approach:
+        {f'- For VISUAL learners: Use diagrams, charts, and visual metaphors' if learning_style == 'visual' else ''}
+        {f'- For AUDITORY learners: Explain concepts as if speaking, use rhythm and patterns' if learning_style == 'auditory' else ''}
+        {f'- For KINESTHETIC learners: Use hands-on examples and practical applications' if learning_style == 'kinesthetic' else ''}
+        {f'- For READING/WRITING learners: Provide structured notes and written explanations' if learning_style == 'reading' else ''}
+
+        Help students learn by:
+        - Explaining at {difficulty_pref} difficulty level
+        - Using examples relevant to {major_field}
+        - Providing practice problems appropriate for {academic_level} level
+        - Being encouraging and supportive
+        - Using course materials as primary source
+        - Responding primarily in {language_pref}
+        """
+        else:
+            # Fallback to original prompt if no profile
+            system_prompt = f"""You are an AI tutor for college students. {course_context}
+                
+        Help students learn by:
+        - Explaining concepts clearly
+        - Providing examples and practice problems
+        - Being encouraging and supportive
+        - Using course materials as primary source
+        - Responding in the same language as the question
+        """
         
         user_prompt = f"""Student Question: {query}
 
@@ -545,10 +629,10 @@ Provide a helpful educational response using the course materials."""
         topics = [word for word in words if word in educational_terms]
         return topics[:3]  # Return max 3 topics
     
-    async def chat_stream(self, question, course_id=None, user_id=None):
+    async def chat_stream(self, question, course_id=None, user_id=None, user_profile=None):
         """Streaming chat function"""
         # Search for relevant documents
-        search_results = self.search(question, course_id, k=8)
+        search_results = self.search(question, course_id, k=20)
         
         # Calculate confidence
         avg_score = np.mean([r['score'] for r in search_results]) if search_results else 0
@@ -573,7 +657,7 @@ Provide a helpful educational response using the course materials."""
         yield f"data: {json.dumps({'type': 'metadata', 'data': metadata})}\n\n"
         
         # Stream the response
-        async for chunk in self.generate_response_stream(question, search_results, course_id):
+        async for chunk in self.generate_response_stream(question, search_results, course_id, user_profile):
             yield f"data: {json.dumps({'type': 'content', 'data': chunk})}\n\n"
         
         # Track progress
@@ -583,13 +667,13 @@ Provide a helpful educational response using the course materials."""
         # Send done signal
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
     
-    def chat(self, question, course_id=None, user_id=None):
+    def chat(self, question, course_id=None, user_id=None, user_profile=None):
         """Non-streaming chat function"""
         # Search for relevant documents
         search_results = self.search(question, course_id, k=6)
         
         # Generate response
-        response = self.generate_response(question, search_results, course_id)
+        response = self.generate_response(question, search_results, course_id, user_profile)
         
         # Calculate confidence
         avg_score = np.mean([r['score'] for r in search_results]) if search_results else 0
@@ -612,6 +696,8 @@ Provide a helpful educational response using the course materials."""
             'top_score': float(search_results[0]['score']) if search_results else 0,
             'course_name': course_name
         }
+        
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -700,7 +786,7 @@ async def chat(request: QuestionRequest):
     
     try:
         # Get response from chatbot
-        result = chatbot.chat(request.question, request.course_id, request.user_id)
+        result = chatbot.chat(request.question, request.course_id, request.user_id, request.user_profile)
         
         # Return response
         return ChatResponse(
@@ -739,7 +825,7 @@ async def chat_stream(request: QuestionRequest):
     
     async def generate():
         try:
-            async for chunk in chatbot.chat_stream(request.question, request.course_id, request.user_id):
+            async for chunk in chatbot.chat_stream(request.question, request.course_id, request.user_id, request.user_profile):
                 yield chunk
         except Exception as e:
             logger.error(f"Streaming error: {e}")
@@ -822,6 +908,40 @@ async def get_examples():
             "Generate a study plan for this course",
             "What are the main points I should remember?"
         ]
+    }
+    
+@app.get("/test/course/{course_id}")
+async def test_course_loading(course_id: int):
+    """Test endpoint to check if course PDFs are loaded"""
+    global chatbot
+    
+    if not chatbot:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chatbot not initialized"
+        )
+    
+    # Check if course is already loaded
+    is_loaded = course_id in chatbot.course_documents
+    
+    # Get course info
+    course_info = chatbot.get_course_info(course_id)
+    
+    # Get number of documents if loaded
+    num_documents = len(chatbot.course_documents.get(course_id, []))
+    
+    # Get sample documents if available
+    sample_docs = []
+    if is_loaded and num_documents > 0:
+        sample_docs = chatbot.course_documents[course_id][:3]  # First 3 chunks
+    
+    return {
+        "course_id": course_id,
+        "is_loaded": is_loaded,
+        "course_info": dict(course_info) if course_info else None,
+        "num_documents": num_documents,
+        "sample_documents": sample_docs,
+        "message": "Course materials loaded successfully" if is_loaded else "Course not loaded yet"
     }
 
 if __name__ == "__main__":
