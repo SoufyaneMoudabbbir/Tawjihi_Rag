@@ -40,6 +40,28 @@ export async function GET(request, { params }) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
+export async function PATCH(request, { params }) {
+  try {
+    const sessionId = params.sessionId
+    const { title } = await request.json()
+
+    if (!title) {
+      return NextResponse.json({ error: "Title is required" }, { status: 400 })
+    }
+
+    const db = await openDb()
+    
+    await db.run(
+      "UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [title, sessionId]
+    )
+
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error("Error updating session title:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  }
+}
 
 
 export async function DELETE(request, { params }) {

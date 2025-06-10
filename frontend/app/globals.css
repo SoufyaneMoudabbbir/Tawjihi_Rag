@@ -18,11 +18,11 @@
   }
 
   .chat-bubble-user {
-    @apply bg-blue-600 text-white ml-auto;
+    @apply bg-gradient-to-r from-blue-600 to-blue-700 text-white ml-auto shadow-lg rounded-2xl;
   }
 
   .chat-bubble-bot {
-    @apply bg-white text-gray-800 mr-auto border border-gray-200;
+    @apply bg-gradient-to-r from-gray-50 to-white text-gray-800 mr-auto border border-gray-200 shadow-md rounded-2xl;
   }
 
   .form-section {
@@ -36,4 +36,93 @@
   .btn-secondary {
     @apply bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-3 px-6 rounded-xl transition-colors duration-200;
   }
+  .prose h3 {
+    @apply text-lg font-semibold text-gray-900 mb-2 mt-4;
+  }
+
+  .prose strong {
+    @apply font-semibold text-gray-900;
+  }
+
+  .prose ul {
+    @apply list-disc list-inside space-y-1 my-3;
+  }
+
+  .prose p {
+    @apply mb-3;
+  }
+
+  .prose br {
+    @apply mb-2;
+  }
+  /* LaTeX styling */
+.prose .latex-block {
+  @apply bg-blue-50 border-l-4 border-blue-400 p-4 my-4 rounded;
+}
+
+.prose .math-display {
+  @apply text-blue-900 font-mono text-lg block text-center;
+}
+
+.prose .latex-inline {
+  @apply bg-blue-100 text-blue-900 px-2 py-1 rounded font-mono text-sm;
+}
+
+/* Headers */
+.prose h1 {
+  @apply text-2xl font-bold mb-4 text-gray-900 mt-6;
+}
+
+.prose h2 {
+  @apply text-xl font-semibold mb-3 text-gray-900 mt-6;
+}
+
+.prose h3 {
+  @apply text-lg font-semibold mb-2 text-gray-900 mt-4;
+}
+
+/* Lists */
+.prose ol {
+  @apply list-decimal list-inside space-y-1 my-3 ml-4;
+}
+
+.prose ul {
+  @apply list-disc list-inside space-y-1 my-3 ml-4;
+}
+
+.prose li {
+  @apply mb-2;
+}
+
+/* Horizontal rule */
+.prose hr {
+  @apply my-6 border-t-2 border-gray-300;
+}
+
+/* Text formatting */
+.prose strong {
+  @apply font-semibold text-gray-900;
+}
+
+.prose em {
+  @apply italic text-gray-800;
+}
+/* KaTeX math styling */
+.katex-display {
+  @apply my-4 p-3 bg-blue-50 border-l-4 border-blue-400 rounded;
+}
+
+.katex {
+  @apply text-blue-900;
+}
+
+/* Remove conflicting prose styles since we're using custom components */
+.prose {
+  @apply text-gray-900;
+}
+
+.prose * {
+  @apply max-w-none;
+}
+  
 }

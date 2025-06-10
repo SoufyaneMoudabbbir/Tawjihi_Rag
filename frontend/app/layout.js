@@ -15,7 +15,7 @@ export default function RootLayout({ children }) {
   return (
     <ClerkProvider>
       <html lang="en">
-        <body className={inter.className}>
+        <body className={`${inter.className} antialiased`} suppressHydrationWarning={true}>
           <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">{children}</div>
         </body>
       </html>
