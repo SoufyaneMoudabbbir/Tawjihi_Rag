@@ -35,6 +35,8 @@ export default function ChatSessionPage() {
   const sessionId = params.sessionId
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
+  const [chapterContext, setChapterContext] = useState(null)
+  const [isChapterChat, setIsChapterChat] = useState(false)
 
   const [messages, setMessages] = useState([])
   const [inputMessage, setInputMessage] = useState("")
@@ -91,38 +93,65 @@ export default function ChatSessionPage() {
   }
 
   const loadChatSession = async () => {
-    try {
-      const response = await fetch(`/api/chats/${sessionId}`)
-      if (response.ok) {
-        const data = await response.json()
-        setMessages(data.messages || [])
-        setSessionTitle(data.title || "Learning Session")
-        setCourseInfo(data.course || null)
-        
-        // Generate suggested questions based on course context
-        if (data.course) {
-          generateSuggestedQuestions(data.course)
-        } else {
-          generateGeneralSuggestedQuestions()
-        }
-
-        // Load user profile
-        const profileResponse = await fetch(`/api/responses?userId=${user.id}`)
-        if (profileResponse.ok) {
-          const profileData = await profileResponse.json()
-          setUserProfile(profileData.responses || {})
-          console.log('User profile loaded:', profileData.responses)
-        }
+  try {
+    console.log('🔄 Loading chat session:', sessionId)
+    
+    const response = await fetch(`/api/chats/${sessionId}`)
+    if (response.ok) {
+      const data = await response.json()
+      
+      console.log('📊 Session data received:', data)
+      
+      // Set session data
+      setMessages(data.messages || [])
+      setSessionTitle(data.title || "Learning Session")
+      setCourseInfo(data.course || null)
+      
+      console.log('📚 Course info loaded:', data.course)
+      
+      // ✅ Handle chapter context
+      if (data.session?.session_type === 'chapter' && data.session?.metadata?.chapterId) {
+        setIsChapterChat(true)
+        setChapterContext({
+          chapterId: data.session.metadata.chapterId,
+          chapterTitle: data.session.metadata.chapterTitle,
+          courseId: data.session.metadata.courseId
+        })
+        console.log('🎯 Chapter chat detected:', data.session.metadata)
       } else {
-        router.push("/dashboard")
+        // ✅ Reset chapter state for regular chats
+        setIsChapterChat(false)
+        setChapterContext(null)
+        console.log('📝 Regular chat session')
       }
-    } catch (error) {
-      console.error("Error loading chat session:", error)
+      
+      console.log('🎯 Chapter context:', chapterContext)
+      console.log('📖 Is chapter chat:', isChapterChat)
+      
+      // Generate suggested questions
+      if (data.course) {
+        generateSuggestedQuestions(data.course)
+      } else {
+        generateGeneralSuggestedQuestions()
+      }
+
+      // Load user profile
+      const profileResponse = await fetch(`/api/responses?userId=${user.id}`)
+      if (profileResponse.ok) {
+        const profileData = await profileResponse.json()
+        setUserProfile(profileData.responses || {})
+      }
+    } else {
+      console.error('❌ Failed to load session:', response.status)
       router.push("/dashboard")
-    } finally {
-      setIsLoading(false)
     }
+  } catch (error) {
+    console.error("❌ Error loading chat session:", error)
+    router.push("/dashboard")
+  } finally {
+    setIsLoading(false)
   }
+}
 
   const generateSuggestedQuestions = (course) => {
     const questions = [
@@ -175,21 +204,48 @@ export default function ChatSessionPage() {
       console.error("Error saving message:", error)
     }
 
+    // ✅ DEBUG: Check context before API call
+    console.log('🔍 About to send message:')
+    console.log('📚 Course Info:', courseInfo)
+    console.log('🆔 Course ID:', courseInfo?.id)
+    console.log('🎯 Is Chapter Chat:', isChapterChat)
+    console.log('📖 Chapter Context:', chapterContext)
+    console.log('📝 Message:', message)
+    console.log('👤 User ID:', user.id)
+
     // Call the educational RAG API
     try {
-      const response = await fetch('http://localhost:8000/chat/stream', {
+      // ✅ Choose endpoint based on chat type
+      const endpoint = isChapterChat 
+        ? 'http://localhost:8000/chat/chapter' 
+        : 'http://localhost:8000/chat/stream'
+
+      // ✅ Build request body
+      const requestBody = {
+        question: message,
+        course_id: courseInfo?.id || null,
+        user_id: user.id,
+        user_profile: userProfile,
+        stream: true
+      }
+
+      // ✅ Add chapter_id for chapter chats
+      if (isChapterChat && chapterContext) {
+        requestBody.chapter_id = chapterContext.chapterId
+      }
+
+      console.log('📤 Using endpoint:', endpoint)
+      console.log('📤 Request body being sent:', requestBody)
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          question: message,
-          course_id: courseInfo?.id || null,
-          user_id: user.id,
-          user_profile: userProfile,
-          stream: true
-        }),
+        body: JSON.stringify(requestBody),
       })
+
+      console.log('📥 Response status:', response.status)
 
       if (response.ok) {
         const reader = response.body.getReader()
@@ -226,7 +282,17 @@ export default function ChatSessionPage() {
                         : msg
                     )
                   )
+                } else if (data.type === 'metadata') {
+                  console.log('📊 Response metadata:', data.data)
+                  // ✅ Log chapter-specific metadata
+                  if (data.data.chapter_name) {
+                    console.log('📖 Chapter:', data.data.chapter_name)
+                  }
+                  if (data.data.search_type) {
+                    console.log('🔍 Search type:', data.data.search_type)
+                  }
                 } else if (data.type === 'done') {
+                  console.log('✅ Response completed')
                   // Save bot response to database
                   try {
                     await fetch(`/api/chats/${sessionId}/messages`, {
@@ -254,25 +320,34 @@ export default function ChatSessionPage() {
           }
         }
       } else {
-        // Fallback response
+        console.error('❌ API response failed:', response.status)
+        // ✅ Chapter-aware fallback response
+        const fallbackContent = isChapterChat && chapterContext
+          ? `I'm here to help you study "${chapterContext.chapterTitle}". Could you please rephrase your question about this chapter?`
+          : courseInfo 
+          ? `I'm here to help you learn ${courseInfo.name}. Could you please rephrase your question or ask about a specific topic from your course materials?`
+          : "I'm here to help with your studies. Could you please provide more details about what you'd like to learn or ask about?"
+
         const fallbackResponse = {
           id: Date.now() + 1,
           type: "bot",
-          content: courseInfo 
-            ? `I'm here to help you learn ${courseInfo.name}. Could you please rephrase your question or ask about a specific topic from your course materials?`
-            : "I'm here to help with your studies. Could you please provide more details about what you'd like to learn or ask about?",
+          content: fallbackContent,
           timestamp: new Date(),
         }
         setMessages((prev) => [...prev, fallbackResponse])
       }
     } catch (error) {
-      console.error("Error calling RAG API:", error)
+      console.error("❌ Error calling RAG API:", error)
       
-      // Fallback response for network errors
+      // ✅ Chapter-aware error response
+      const errorContent = isChapterChat && chapterContext
+        ? `I'm having trouble connecting while studying "${chapterContext.chapterTitle}". Please try again in a moment.`
+        : "I'm having trouble connecting right now. Please try again in a moment."
+
       const errorResponse = {
         id: Date.now() + 1,
         type: "bot",
-        content: "I'm having trouble connecting right now. Please try again in a moment.",
+        content: errorContent,
         timestamp: new Date(),
       }
       setMessages((prev) => [...prev, errorResponse])

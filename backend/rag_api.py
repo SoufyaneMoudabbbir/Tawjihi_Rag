@@ -324,25 +324,31 @@ class EducationalRAG:
         return True
     
     def search(self, query, course_id=None, k=5):
-        """Search for relevant documents"""
-        if course_id and course_id not in self.course_indexes:
-            # Try to load course materials
+        """Search for relevant documents with proper course isolation"""
+        logger.info(f"🔍 Search request: course_id={course_id}, query='{query[:50]}...'")
+        
+        # If no course_id specified, return empty (no cross-course contamination)
+        if not course_id:
+            logger.warning("No course_id provided for search")
+            return []
+        
+        # Ensure course is loaded
+        if course_id not in self.course_indexes:
+            logger.info(f"Course {course_id} not in indexes, attempting to load...")
             if not self.load_course_materials(course_id):
+                logger.error(f"Failed to load course {course_id}")
                 return []
         
-        # Determine which index to search
-        if course_id and course_id in self.course_indexes:
-            # Search specific course
-            index = self.course_indexes[course_id]
-            documents = self.course_documents[course_id]
-        elif len(self.course_indexes) > 0:
-            # Search all courses or first available course
-            course_id = list(self.course_indexes.keys())[0]
-            index = self.course_indexes[course_id]
-            documents = self.course_documents[course_id]
-        else:
-            # No courses loaded
+        # Verify course is now available
+        if course_id not in self.course_indexes:
+            logger.error(f"Course {course_id} still not available after load attempt")
             return []
+        
+        # Search ONLY the specified course (no fallback)
+        index = self.course_indexes[course_id]
+        documents = self.course_documents[course_id]
+        
+        logger.info(f"✅ Searching course {course_id} with {len(documents)} documents")
         
         # Encode query
         query_embedding = self.embedding_model.encode([query])
@@ -351,24 +357,38 @@ class EducationalRAG:
         # Search
         scores, indices = index.search(query_embedding.astype('float32'), k)
         
+        # Format results
         results = []
-        for score, idx in zip(scores[0], indices[0]):
+        for i, (score, idx) in enumerate(zip(scores[0], indices[0])):
             if idx < len(documents):
-                # Add keyword matching bonus
-                keyword_bonus = self.calculate_keyword_bonus(query, documents[idx])
-                adjusted_score = float(score) + keyword_bonus
-                
                 results.append({
                     'text': documents[idx],
-                    'score': adjusted_score,
-                    'original_score': float(score),
-                    'keyword_bonus': keyword_bonus,
-                    'course_id': course_id
+                    'score': float(score),
+                    'source': f"Course {course_id}, Document {idx}",
+                    'course_id': course_id  # ✅ Add course_id to results
                 })
         
-        # Re-sort by adjusted score
-        results.sort(key=lambda x: x['score'], reverse=True)
+        logger.info(f"🎯 Found {len(results)} results for course {course_id}")
         return results
+    
+    def ensure_course_loaded(self, course_id):
+        """Ensure a specific course is loaded, with better error handling"""
+        if not course_id:
+            return False
+            
+        if course_id in self.course_indexes:
+            logger.info(f"Course {course_id} already loaded")
+            return True
+        
+        logger.info(f"Loading course {course_id}...")
+        success = self.load_course_materials(course_id)
+        
+        if success and course_id in self.course_indexes:
+            logger.info(f"✅ Course {course_id} loaded successfully")
+            return True
+        else:
+            logger.error(f"❌ Failed to load course {course_id}")
+            return False
     
     def calculate_keyword_bonus(self, query, text):
         """Calculate keyword matching bonus for educational content"""
@@ -395,30 +415,47 @@ class EducationalRAG:
     def search_chapter_content(self, query, course_id, chapter_id, k=5):
         """Search for relevant documents within a specific chapter only"""
         try:
-            # Get chapter content from database
+            logger.info(f"Searching course {course_id}, chapter {chapter_id} for: '{query[:50]}...'")
+            
+            # Check database connection
             if not self.conn:
                 logger.error("No database connection")
                 return []
-                
-            cursor = self.conn.execute("""
-                SELECT content_text, page_reference 
-                FROM chapter_content 
-                WHERE chapter_id = ?
-            """, (chapter_id,))
             
+            # ✅ CRITICAL FIX: Validate chapter belongs to course and get content
+            cursor = self.conn.execute("""
+                SELECT cc.content_text, cc.page_reference, ch.title, ch.chapter_number
+                FROM chapter_content cc
+                JOIN course_chapters ch ON cc.chapter_id = ch.id
+                WHERE ch.id = ? AND ch.course_id = ?
+            """, (chapter_id, course_id))
+            
+            results = cursor.fetchall()
+            
+            if not results:
+                logger.error(f"❌ Chapter {chapter_id} not found in course {course_id} or no content available")
+                return []
+            
+            # Extract content and metadata
             chapter_documents = []
             chapter_metadata = []
+            chapter_title = None
+            chapter_number = None
             
-            for row in cursor.fetchall():
+            for row in results:
                 if row[0]:  # content_text
                     chapter_documents.append(row[0])
                     chapter_metadata.append(row[1])  # page_reference
+                    if not chapter_title:
+                        chapter_title = row[2]  # title
+                        chapter_number = row[3]  # chapter_number
             
             if not chapter_documents:
-                logger.warning(f"No content found for chapter {chapter_id}")
+                logger.warning(f"No content documents found for chapter {chapter_id}")
                 return []
             
-            logger.info(f"Searching within chapter {chapter_id}: {len(chapter_documents)} documents")
+            logger.info(f"✅ Validated: Chapter {chapter_id} '{chapter_title}' (#{chapter_number}) in course {course_id}")
+            logger.info(f"Searching within {len(chapter_documents)} content chunks")
             
             # Create embeddings for chapter content only
             embeddings = self.embedding_model.encode(chapter_documents)
@@ -435,25 +472,27 @@ class EducationalRAG:
             
             scores, indices = index.search(query_embedding.astype('float32'), min(k, len(chapter_documents)))
             
-            results = []
+            search_results = []
             for score, idx in zip(scores[0], indices[0]):
                 if idx < len(chapter_documents):
                     keyword_bonus = self.calculate_keyword_bonus(query, chapter_documents[idx])
                     adjusted_score = float(score) + keyword_bonus
                     
-                    results.append({
+                    search_results.append({
                         'text': chapter_documents[idx],
                         'score': adjusted_score,
                         'original_score': float(score),
                         'keyword_bonus': keyword_bonus,
                         'course_id': course_id,
                         'chapter_id': chapter_id,
+                        'chapter_title': chapter_title,
+                        'chapter_number': chapter_number,
                         'page_reference': chapter_metadata[idx] if idx < len(chapter_metadata) else None
                     })
             
-            results.sort(key=lambda x: x['score'], reverse=True)
-            logger.info(f"Found {len(results)} relevant chunks in chapter {chapter_id}")
-            return results
+            search_results.sort(key=lambda x: x['score'], reverse=True)
+            logger.info(f"✅ Found {len(search_results)} relevant chunks in course {course_id}, chapter {chapter_id}")
+            return search_results
             
         except Exception as e:
             logger.error(f"Error searching chapter content: {e}")
@@ -1174,6 +1213,270 @@ Provide a helpful educational response using the course materials."""
         except Exception as e:
             logger.error(f"Error getting course files: {e}")
             return []
+        
+    def generate_chapter_quiz(self, course_id, chapter_id, num_questions=5):
+        """Generate a quiz for a specific chapter using AI"""
+        logger.info(f"🎯 Generating quiz for course {course_id}, chapter {chapter_id}")
+        
+        try:
+            # ✅ Validate chapter belongs to course and get metadata
+            if not self.conn:
+                logger.error("No database connection")
+                return None
+            
+            # Get chapter and course information with validation
+            cursor = self.conn.execute("""
+                SELECT cc.title, cc.chapter_number, c.name 
+                FROM course_chapters cc 
+                JOIN courses c ON cc.course_id = c.id 
+                WHERE cc.id = ? AND cc.course_id = ?
+            """, (chapter_id, course_id))
+            
+            result = cursor.fetchone()
+            if not result:
+                logger.error(f"❌ Chapter {chapter_id} does not belong to course {course_id}")
+                return None
+            
+            chapter_title, chapter_number, course_name = result
+            logger.info(f"✅ Validated: Chapter {chapter_id} '{chapter_title}' belongs to course {course_id} '{course_name}'")
+            
+            # ✅ Get content using multiple search queries for diverse chunks
+            chapter_content_results = []
+            
+            # Multiple search queries to get different aspects of the chapter
+            search_queries = [
+                "key concepts definitions terminology",
+                "examples applications processes methods", 
+                "important principles theory fundamentals",
+                "procedures techniques algorithms steps",
+                "summary overview main points concepts"
+            ]
+
+            for query in search_queries:
+                try:
+                    results = self.search_chapter_content(query, course_id, chapter_id, k=6)
+                    chapter_content_results.extend(results)
+                    
+                    # Stop if we have enough content
+                    if len(chapter_content_results) >= 20:
+                        break
+                except Exception as e:
+                    logger.error(f"Error with search query '{query}': {e}")
+                    continue
+
+            # Remove duplicates based on text content (keep unique chunks)
+            seen_texts = set()
+            unique_results = []
+            for result in chapter_content_results:
+                text_preview = result['text'][:100]  # First 100 chars as unique identifier
+                if text_preview not in seen_texts:
+                    seen_texts.add(text_preview)
+                    unique_results.append(result)
+
+            chapter_content_results = unique_results
+            logger.info(f"📚 Found {len(chapter_content_results)} unique content chunks for chapter {chapter_id}")
+
+            if not chapter_content_results:
+                logger.error(f"No content found for chapter {chapter_id}")
+                return None
+            
+            # ✅ Use up to 10 chunks for quiz generation
+            content_text = "\n\n".join([result['text'] for result in chapter_content_results[:10]])
+            logger.info(f"🧠 Using {min(len(chapter_content_results), 10)} content chunks for quiz generation")
+            
+            # ✅ Enhanced system prompt for consistent JSON generation
+            system_prompt = """You are an expert quiz generator. Create a chapter-specific quiz using ONLY the provided chapter content.
+
+    CRITICAL INSTRUCTIONS:
+    - Use ONLY information from the provided chapter content
+    - Do NOT use external knowledge or general information  
+    - Create exactly 10 questions (6-7 multiple choice, 3-4 true/false)
+    - Output must be valid JSON with exact structure shown below
+    - DO NOT wrap JSON in code blocks or markdown
+
+    REQUIRED JSON FORMAT:
+    {
+    "quiz_metadata": {
+        "chapter_id": [provided_chapter_id],
+        "title": "[chapter_title] - Quiz", 
+        "difficulty": "intermediate",
+        "estimated_time": "8 minutes",
+        "total_questions": 10,
+        "course_name": "[course_name]",
+        "chapter_number": [chapter_number]
+    },
+    "questions": [
+        {
+        "id": 1,
+        "type": "multiple_choice",
+        "question": "Clear, specific question from chapter content?",
+        "options": [
+            "Wrong answer A",
+            "CORRECT ANSWER",
+            "Wrong answer B", 
+            "Wrong answer C"
+        ],
+        "correct": 1,
+        "explanation": "Brief explanation why this answer is correct, referencing the chapter content."
+        },
+        {
+        "id": 2,
+        "type": "true_false",
+        "question": "Statement that can be verified from chapter content.",
+        "options": ["True", "False"],
+        "correct": 0,
+        "explanation": "Explanation with reference to chapter content."
+        }
+    ]
+    }
+
+    QUESTION CREATION RULES:
+    1. Multiple Choice: Create 4 plausible options, only 1 correct
+    2. True/False: Use options ["True", "False"], correct: 0 or 1  
+    3. Correct index is 0-based (0=first option, 1=second, etc.)
+    4. Questions must be answerable from chapter content only
+    5. Explanations must reference specific chapter concepts
+    6. Make wrong answers plausible but clearly incorrect
+    7. Focus on understanding, not memorization
+
+    OUTPUT ONLY VALID JSON. NO CODE BLOCKS OR MARKDOWN."""
+
+            user_prompt = f"""CHAPTER CONTENT:
+    {content_text}
+
+    CHAPTER INFO:
+    - Chapter ID: {chapter_id}
+    - Chapter Title: {chapter_title}
+    - Course Name: {course_name}  
+    - Chapter Number: {chapter_number}
+
+    Generate a quiz based ONLY on this chapter content using the specified JSON format. Output only valid JSON."""
+
+            # ✅ Call AI API with optimized settings
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.2,  # Low temperature for consistent JSON
+                "max_tokens": 2500,
+                "top_p": 0.9
+            }
+            
+            logger.info("🤖 Calling AI API for quiz generation...")
+            
+            response = requests.post(
+                'https://api.deepseek.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=45
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                quiz_json_text = result['choices'][0]['message']['content']
+                
+                logger.info(f"📥 Received AI response ({len(quiz_json_text)} chars)")
+                
+                # ✅ Clean the response and parse JSON
+                try:
+                    # Remove markdown code blocks if present
+                    cleaned_response = quiz_json_text.strip()
+                    if cleaned_response.startswith('```json'):
+                        cleaned_response = cleaned_response[7:]  # Remove ```json
+                        logger.info("🧹 Removed markdown opening")
+                    if cleaned_response.endswith('```'):
+                        cleaned_response = cleaned_response[:-3]  # Remove ```
+                        logger.info("🧹 Removed markdown closing")
+                    cleaned_response = cleaned_response.strip()
+                    
+                    # Parse JSON
+                    quiz_data = json.loads(cleaned_response)
+                    
+                    # ✅ Validate quiz structure
+                    if not self.validate_quiz_structure(quiz_data):
+                        logger.error("❌ Generated quiz has invalid structure")
+                        return None
+                    
+                    logger.info(f"✅ Quiz generated successfully for chapter {chapter_id}")
+                    logger.info(f"📝 Generated {len(quiz_data.get('questions', []))} questions")
+                    
+                    return quiz_data
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ Invalid JSON in quiz response: {e}")
+                    logger.error(f"🔍 Cleaned response preview: {cleaned_response[:200]}...")
+                    return None
+            else:
+                logger.error(f"❌ AI API Error: {response.status_code} - {response.text}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error generating quiz: {e}")
+            return None
+
+    def validate_quiz_structure(self, quiz_data):
+        """Validate the generated quiz has correct structure"""
+        try:
+            # Check required top-level keys
+            if not isinstance(quiz_data, dict):
+                logger.error("Quiz data is not a dictionary")
+                return False
+            
+            if 'quiz_metadata' not in quiz_data or 'questions' not in quiz_data:
+                logger.error("Missing required keys: quiz_metadata or questions")
+                return False
+            
+            # Check metadata
+            metadata = quiz_data['quiz_metadata']
+            required_metadata = ['chapter_id', 'title', 'total_questions']
+            for key in required_metadata:
+                if key not in metadata:
+                    logger.error(f"Missing metadata key: {key}")
+                    return False
+            
+            # Check questions
+            questions = quiz_data['questions']
+            if not isinstance(questions, list) or len(questions) == 0:
+                logger.error("Questions must be a non-empty list")
+                return False
+            
+            # Validate each question
+            for i, question in enumerate(questions):
+                required_keys = ['id', 'type', 'question', 'options', 'correct', 'explanation']
+                for key in required_keys:
+                    if key not in question:
+                        logger.error(f"Question {i+1} missing key: {key}")
+                        return False
+                
+                # Check question type
+                if question['type'] not in ['multiple_choice', 'true_false']:
+                    logger.error(f"Question {i+1} has invalid type: {question['type']}")
+                    return False
+                
+                # Check options
+                if not isinstance(question['options'], list):
+                    logger.error(f"Question {i+1} options must be a list")
+                    return False
+                
+                # Check correct index
+                correct_idx = question['correct']
+                if not isinstance(correct_idx, int) or correct_idx < 0 or correct_idx >= len(question['options']):
+                    logger.error(f"Question {i+1} has invalid correct index: {correct_idx}")
+                    return False
+            
+            logger.info("✅ Quiz structure validation passed")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error validating quiz structure: {e}")
+            return False    
 
     def analyze_document_structure(self, file_path, course_id):
         """Main function to analyze PDF and create chapter structure"""
@@ -1596,6 +1899,324 @@ async def get_examples():
             "What are the main points I should remember?"
         ]
     }
+    
+@app.post("/api/quiz/generate-and-store/{course_id}/{chapter_id}")
+async def generate_and_store_quiz(course_id: int, chapter_id: int):
+    """Generate quiz and store in database"""
+    global chatbot
+    
+    if not chatbot:
+        raise HTTPException(status_code=503, detail="Chatbot not initialized")
+    
+    try:
+        # Generate quiz using existing function
+        quiz_data = chatbot.generate_chapter_quiz(course_id, chapter_id)
+        
+        if not quiz_data:
+            raise HTTPException(status_code=500, detail="Failed to generate quiz")
+        
+        # Store in database
+        if chatbot.conn:
+            cursor = chatbot.conn.execute("""
+                INSERT INTO chapter_quizzes (chapter_id, quiz_data, difficulty, question_count)
+                VALUES (?, ?, ?, ?)
+            """, (
+                chapter_id,
+                json.dumps(quiz_data),
+                quiz_data.get('quiz_metadata', {}).get('difficulty', 'medium'),
+                len(quiz_data.get('questions', []))
+            ))
+            
+            quiz_id = cursor.lastrowid
+            chatbot.conn.commit()
+            
+            logger.info(f"✅ Quiz stored with ID {quiz_id} for chapter {chapter_id}")
+            
+            return {
+                "success": True,
+                "quiz_id": quiz_id,
+                "chapter_id": chapter_id,
+                "quiz_data": quiz_data
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+            
+    except Exception as e:
+        logger.error(f"Error generating and storing quiz: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/quiz/{course_id}/{chapter_id}")
+async def get_chapter_quiz(course_id: int, chapter_id: int, user_id: str):
+    """Get quiz for a chapter (or generate if doesn't exist)"""
+    global chatbot
+    
+    if not chatbot or not chatbot.conn:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        # Check if quiz already exists
+        cursor = chatbot.conn.execute("""
+            SELECT cq.id, cq.quiz_data, cq.created_at
+            FROM chapter_quizzes cq
+            JOIN course_chapters cc ON cq.chapter_id = cc.id
+            WHERE cc.id = ? AND cc.course_id = ?
+            ORDER BY cq.created_at DESC
+            LIMIT 1
+        """, (chapter_id, course_id))
+        
+        existing_quiz = cursor.fetchone()
+        
+        if existing_quiz:
+            # ✅ Existing quiz found
+            quiz_id = existing_quiz[0]  # Define quiz_id here
+            quiz_data = json.loads(existing_quiz[1])
+            
+            # ✅ Add quiz_id to quiz_data for frontend
+            quiz_data['quiz_id'] = quiz_id
+            
+            logger.info(f"📚 Retrieved existing quiz {quiz_id} for chapter {chapter_id}")
+            
+            return {
+                "success": True,
+                "quiz_id": quiz_id,
+                "quiz_data": quiz_data,
+                "source": "existing"
+            }
+        else:
+            # ✅ Generate new quiz
+            quiz_data = chatbot.generate_chapter_quiz(course_id, chapter_id)
+            
+            if not quiz_data:
+                raise HTTPException(status_code=500, detail="Failed to generate quiz")
+            
+            # Store new quiz
+            cursor = chatbot.conn.execute("""
+                INSERT INTO chapter_quizzes (chapter_id, quiz_data, difficulty, question_count)
+                VALUES (?, ?, ?, ?)
+            """, (
+                chapter_id,
+                json.dumps(quiz_data),
+                quiz_data.get('quiz_metadata', {}).get('difficulty', 'medium'),
+                len(quiz_data.get('questions', []))
+            ))
+            
+            quiz_id = cursor.lastrowid  # Define quiz_id here
+            chatbot.conn.commit()
+            
+            # ✅ Add quiz_id to quiz_data for frontend
+            quiz_data['quiz_id'] = quiz_id
+            
+            logger.info(f"🆕 Generated and stored new quiz {quiz_id} for chapter {chapter_id}")
+            
+            return {
+                "success": True,
+                "quiz_id": quiz_id,
+                "quiz_data": quiz_data,
+                "source": "generated"
+            }
+            
+    except Exception as e:
+        logger.error(f"Error getting chapter quiz: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    
+@app.post("/api/quiz/submit")
+async def submit_quiz_answers(request: dict):
+    """Submit quiz answers and update user progress"""
+    global chatbot
+    
+    if not chatbot or not chatbot.conn:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        user_id = request.get('user_id')
+        quiz_id = request.get('quiz_id')
+        chapter_id = request.get('chapter_id')
+        course_id = request.get('course_id')
+        user_answers = request.get('user_answers')  # [0, 1, 2, 1, 0]
+        time_taken = request.get('time_taken', 0)
+        
+        if not all([user_id, quiz_id, chapter_id, course_id, user_answers is not None]):
+            raise HTTPException(status_code=400, detail="Missing required fields")
+        
+        # Get quiz data
+        cursor = chatbot.conn.execute("SELECT quiz_data FROM chapter_quizzes WHERE id = ?", (quiz_id,))
+        quiz_result = cursor.fetchone()
+        
+        if not quiz_result:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+        
+        quiz_data = json.loads(quiz_result[0])
+        questions = quiz_data.get('questions', [])
+        
+        # Calculate score
+        correct_answers = 0
+        total_questions = len(questions)
+
+        logger.info(f"🔍 Scoring debug: total_questions={total_questions}, user_answers_length={len(user_answers)}")
+        logger.info(f"🔍 User answers: {user_answers}")
+
+        for i, user_answer in enumerate(user_answers):
+            if i < len(questions):
+                correct_answer = questions[i].get('correct')
+                is_correct = correct_answer == user_answer
+                logger.info(f"🔍 Q{i+1}: user={user_answer}, correct={correct_answer}, match={is_correct}")
+                if is_correct:
+                    correct_answers += 1
+
+        score = int((correct_answers / total_questions) * 100) if total_questions > 0 else 0
+        logger.info(f"🔍 Final score: {correct_answers}/{total_questions} = {score}%")
+        
+        # Record attempt
+        chatbot.conn.execute("""
+            INSERT INTO user_quiz_attempts 
+            (user_id, quiz_id, chapter_id, course_id, user_answers, score, total_questions, correct_answers, time_taken)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, quiz_id, chapter_id, course_id, json.dumps(user_answers), score, total_questions, correct_answers, time_taken))
+        
+        # Update user progress (with retake logic)
+        cursor = chatbot.conn.execute("""
+            SELECT best_quiz_score, quiz_attempts, status FROM user_chapter_progress
+            WHERE user_id = ? AND chapter_id = ?
+        """, (user_id, chapter_id))
+        
+        progress_result = cursor.fetchone()
+        
+        if progress_result:
+            current_best, attempts, current_status = progress_result
+            new_best = max(current_best, score)
+            new_status = 'completed' if new_best >= 70 else current_status
+            
+            chatbot.conn.execute("""
+                UPDATE user_chapter_progress 
+                SET best_quiz_score = ?, quiz_attempts = ?, status = ?, 
+                    last_attempt_at = CURRENT_TIMESTAMP,
+                    completed_at = CASE 
+                        WHEN ? >= 70 AND completed_at IS NULL THEN CURRENT_TIMESTAMP
+                        ELSE completed_at 
+                    END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND chapter_id = ?
+            """, (new_best, attempts + 1, new_status, new_best, user_id, chapter_id))
+        else:
+            # First attempt - create progress record
+            status = 'completed' if score >= 70 else 'unlocked'
+            completed_at = 'CURRENT_TIMESTAMP' if score >= 70 else None
+            
+            chatbot.conn.execute("""
+                INSERT INTO user_chapter_progress 
+                (user_id, course_id, chapter_id, status, best_quiz_score, quiz_attempts, last_attempt_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, ?)
+            """, (user_id, course_id, chapter_id, status, score, completed_at))
+        
+        # If completed (70%+), unlock next chapter
+        if score >= 70:
+            # Find the next chapter to unlock
+            cursor = chatbot.conn.execute("""
+                SELECT cc.id, cc.chapter_number 
+                FROM course_chapters cc 
+                WHERE cc.course_id = ? AND cc.chapter_number = (
+                    SELECT chapter_number + 1 FROM course_chapters WHERE id = ?
+                )
+            """, (course_id, chapter_id))
+            
+            next_chapter = cursor.fetchone()
+            
+            if next_chapter:
+                next_chapter_id = next_chapter[0]
+                logger.info(f"🔓 Unlocking next chapter {next_chapter_id} after completing chapter {chapter_id}")
+                
+                # Insert or update next chapter progress
+                chatbot.conn.execute("""
+                    INSERT OR REPLACE INTO user_chapter_progress 
+                    (user_id, course_id, chapter_id, status, created_at, updated_at)
+                    VALUES (?, ?, ?, 'unlocked', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, (user_id, course_id, next_chapter_id))
+                
+                logger.info(f"✅ Chapter {next_chapter_id} unlocked for user {user_id}")
+            else:
+                logger.info(f"🏁 Course completed! No more chapters to unlock after chapter {chapter_id}")
+        
+        chatbot.conn.commit()
+        
+        logger.info(f"✅ Quiz submitted: User {user_id}, Chapter {chapter_id}, Score {score}%")
+        
+        return {
+            "success": True,
+            "score": score,
+            "correct_answers": correct_answers,
+            "total_questions": total_questions,
+            "passed": score >= 70,
+            "previous_best": progress_result[0] if progress_result else 0,
+            "new_best": max(progress_result[0] if progress_result else 0, score),
+            "status": 'completed' if score >= 70 else 'unlocked'
+        }
+        
+    except Exception as e:
+        logger.error(f"Error submitting quiz: {e}")
+        raise HTTPException(status_code=500, detail=str(e))    
+    
+@app.post("/test/generate-quiz/{course_id}/{chapter_id}")
+async def test_generate_quiz(course_id: int, chapter_id: int):
+    """Test endpoint for quiz generation"""
+    global chatbot
+    
+    if not chatbot:
+        raise HTTPException(status_code=503, detail="Chatbot not initialized")
+    
+    quiz_data = chatbot.generate_chapter_quiz(course_id, chapter_id)
+    
+    if quiz_data:
+        return {"success": True, "quiz": quiz_data}
+    else:
+        return {"success": False, "error": "Failed to generate quiz"}  
+    
+@app.get("/api/user-progress/{user_id}/{course_id}")
+async def get_user_progress(user_id: str, course_id: int):
+    """Get user progress for a specific course"""
+    global chatbot
+    
+    if not chatbot or not chatbot.conn:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Get user progress with chapter details
+        cursor = chatbot.conn.execute("""
+            SELECT 
+                ucp.chapter_id,
+                ucp.status,
+                ucp.best_quiz_score,
+                ucp.quiz_attempts,
+                cc.title,
+                cc.chapter_number
+            FROM user_chapter_progress ucp
+            JOIN course_chapters cc ON ucp.chapter_id = cc.id
+            WHERE ucp.user_id = ? AND ucp.course_id = ?
+            ORDER BY cc.chapter_number
+        """, (user_id, course_id))
+        
+        progress_records = []
+        for row in cursor.fetchall():
+            progress_records.append({
+                "chapter_id": row[0],
+                "status": row[1],
+                "best_score": row[2], 
+                "attempts": row[3],
+                "title": row[4],
+                "chapter_number": row[5]
+            })
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "course_id": course_id,
+            "progress_records": progress_records,
+            "total_chapters": len(progress_records),
+            "completed_chapters": len([p for p in progress_records if p["best_score"] >= 70])
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting user progress: {e}")
+        raise HTTPException(status_code=500, detail=str(e))      
     
 @app.get("/test/course/{course_id}")
 async def test_course_loading(course_id: int):

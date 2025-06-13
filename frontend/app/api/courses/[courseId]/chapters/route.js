@@ -3,20 +3,15 @@ import { openDb } from "@/lib/db"
 
 export async function GET(request, { params }) {
   try {
-    // Fix: Await params in Next.js 15
-    const { courseId } = await params
+    const resolvedParams = await params
+    const courseId = parseInt(resolvedParams.courseId)
+    
     const db = await openDb()
 
-    // Get chapters for this course
     const chapters = await db.all(`
-      SELECT 
-        cc.*,
-        COUNT(cq.id) as quiz_count
-      FROM course_chapters cc
-      LEFT JOIN chapter_quizzes cq ON cc.id = cq.chapter_id
-      WHERE cc.course_id = ?
-      GROUP BY cc.id
-      ORDER BY cc.chapter_number
+      SELECT * FROM course_chapters 
+      WHERE course_id = ?
+      ORDER BY chapter_number
     `, [courseId])
 
     return NextResponse.json({ 

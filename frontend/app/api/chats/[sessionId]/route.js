@@ -5,6 +5,7 @@ export async function GET(request, { params }) {
   try {
     const { sessionId } = await params
     const db = await openDb()
+    
 
     // Get session details
     const session = await db.get("SELECT * FROM chat_sessions WHERE id = ?", [sessionId])
@@ -31,10 +32,32 @@ export async function GET(request, { params }) {
       timestamp: new Date(msg.timestamp),
     }))
 
-    return NextResponse.json({
-      title: session.title,
-      messages: formattedMessages,
-    })
+    let course = null
+      if (session.course_id) {
+        course = await db.get("SELECT id, name, professor, semester FROM courses WHERE id = ?", [session.course_id])
+      }
+
+      let sessionMetadata = {}
+        try {
+          sessionMetadata = session.metadata ? JSON.parse(session.metadata) : {}
+        } catch (e) {
+          console.error('Error parsing session metadata:', e)
+          sessionMetadata = {}
+        }
+
+        return NextResponse.json({
+          title: session.title,
+          messages: formattedMessages,
+          course: course,
+          session: {
+            id: session.id,
+            course_id: session.course_id,
+            session_type: session.session_type,  // ✅ Add session type
+            metadata: sessionMetadata,           // ✅ Add parsed metadata (chapter info)
+            created_at: session.created_at,
+            updated_at: session.updated_at
+          }
+        })
   } catch (error) {
     console.error("Error fetching chat session:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })

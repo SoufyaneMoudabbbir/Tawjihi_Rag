@@ -36,7 +36,7 @@ export async function POST(request) {
     `)
 
     await db.exec(`
-      CREATE TABLE IF NOT EXISTS chapter_quizzes (
+      CREATE TABLE IF NOT EXISTS chapter_quizzes_11 (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chapter_id INTEGER NOT NULL,
         quiz_data TEXT NOT NULL,

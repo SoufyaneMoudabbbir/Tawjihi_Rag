@@ -3,7 +3,7 @@ import { openDb } from "@/lib/db"
 
 export async function POST(request) {
   try {
-    const { userId, title, courseId } = await request.json()
+    const { userId, title, courseId, sessionType, metadata } = await request.json()
 
     if (!userId) {
       return NextResponse.json({ error: "User ID required" }, { status: 400 })
@@ -11,24 +11,27 @@ export async function POST(request) {
 
     const db = await openDb()
 
-    // Update chat_sessions table to include course_id
+    // ✅ Create/update chat_sessions table with chapter support
     await db.exec(`
       CREATE TABLE IF NOT EXISTS chat_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
         course_id INTEGER,
         title TEXT NOT NULL,
+        session_type TEXT DEFAULT 'general',
+        metadata TEXT DEFAULT '{}',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE SET NULL
       )
     `)
 
-    // Create index on user_id and course_id for faster queries
+    // Create indexes for performance
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)`)
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_course_id ON chat_sessions(course_id)`)
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_type ON chat_sessions(session_type)`)
 
-    // Create chat_messages table with indexes
+    // Create chat_messages table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS chat_messages (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,19 +45,39 @@ export async function POST(request) {
 
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)`)
 
-    // Insert new chat session
+    // ✅ Insert new chat session with chapter metadata
     const result = await db.run(
-      "INSERT INTO chat_sessions (user_id, course_id, title) VALUES (?, ?, ?)", 
-      [userId, courseId || null, title || "Educational Learning Session"]
+      "INSERT INTO chat_sessions (user_id, course_id, title, session_type, metadata) VALUES (?, ?, ?, ?, ?)", 
+      [
+        userId, 
+        courseId || null, 
+        title || "Educational Learning Session",
+        sessionType || 'general',
+        JSON.stringify(metadata || {})
+      ]
     )
 
-    // If this is a course-specific session, get course info for context
+    // ✅ Generate context-aware initial message
     let initialMessage = "Hello! I'm your educational assistant. I've reviewed your learning profile and I'm here to help you with your studies. What would you like to learn about today?"
     
     if (courseId) {
       const course = await db.get("SELECT name FROM courses WHERE id = ?", [courseId])
       if (course) {
-        initialMessage = `Hello! I'm ready to help you learn ${course.name}. I have access to your course materials and can explain concepts, answer questions, create practice problems, and help you study effectively. What would you like to explore today?`
+        if (sessionType === 'chapter' && metadata?.chapterTitle) {
+          // Chapter-specific message
+          initialMessage = `Hello! I'm ready to help you study **"${metadata.chapterTitle}"** from ${course.name}. 
+
+I'll focus specifically on this chapter's content and help you:
+- Understand key concepts from this chapter
+- Answer questions about the material
+- Create practice problems
+- Explain difficult topics
+
+What would you like to explore in this chapter?`
+        } else {
+          // General course message
+          initialMessage = `Hello! I'm ready to help you learn ${course.name}. I have access to your course materials and can explain concepts, answer questions, create practice problems, and help you study effectively. What would you like to explore today?`
+        }
         
         // Update course chat count
         await db.run("UPDATE courses SET chat_count = chat_count + 1, last_accessed = CURRENT_TIMESTAMP WHERE id = ?", [courseId])

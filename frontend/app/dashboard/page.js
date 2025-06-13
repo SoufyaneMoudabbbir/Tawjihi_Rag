@@ -3,6 +3,7 @@
 import { useUser, UserButton } from "@clerk/nextjs"
 import { motion } from "framer-motion"
 import { useState, useEffect } from "react"
+import QuizInterface from "@/components/QuizInterface"
 import { useRouter } from "next/navigation"
 import { 
   Plus, 
@@ -32,6 +33,8 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
   const [courseChapters, setCourseChapters] = useState({})
+  const [showQuiz, setShowQuiz] = useState(false)
+  const [quizContext, setQuizContext] = useState(null)
   const [stats, setStats] = useState({
     totalCourses: 0,
     totalSessions: 0,
@@ -46,6 +49,33 @@ export default function DashboardPage() {
       loadData()
     }
   }, [isLoaded, user])
+
+  const startQuiz = (courseId, chapterId, chapterTitle) => {
+  console.log('🎯 Starting quiz for:', { courseId, chapterId, chapterTitle })
+  setQuizContext({ courseId, chapterId, chapterTitle })
+  setShowQuiz(true)
+}
+
+  const handleQuizComplete = (results) => {
+    console.log('✅ Quiz completed:', results)
+    setShowQuiz(false)
+    setQuizContext(null)
+    
+    // Show success message
+    if (results.passed) {
+      alert(`🎉 Congratulations! You scored ${results.score}% and completed the chapter!`)
+    } else {
+      alert(`📚 You scored ${results.score}%. Keep studying and try again!`)
+    }
+    
+    // Reload dashboard data to update progress
+    loadData()
+  }
+
+  const closeQuiz = () => {
+    setShowQuiz(false)
+    setQuizContext(null)
+  }
 
   const loadData = async () => {
     try {
@@ -78,20 +108,28 @@ export default function DashboardPage() {
   }
   const startChapterChat = async (courseId, chapterId, chapterTitle) => {
     try {
+      console.log('🎯 Starting chapter chat:', { courseId, chapterId, chapterTitle })
+      
       const response = await fetch('/api/chats', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userId: user.id,
           courseId: courseId,
-          title: `${chapterTitle} - Chapter Discussion`,
-          chapterContext: chapterId
+          title: `${chapterTitle} - Chapter Study`,
+          sessionType: 'chapter',  // ✅ Mark as chapter session
+          metadata: {
+            chapterId: chapterId,
+            chapterTitle: chapterTitle,
+            courseId: courseId
+          }
         })
       })
 
       if (response.ok) {
         const data = await response.json()
-        router.push(`/chat/${data.sessionId}`)
+        // ✅ Navigate with chapter context in URL
+        router.push(`/chat/${data.sessionId}?mode=chapter&chapter=${chapterId}&course=${courseId}`)
       } else {
         alert("Failed to start chapter chat")
       }
@@ -107,44 +145,80 @@ export default function DashboardPage() {
     
     for (const course of coursesList) {
       try {
+        // Get basic chapter structure
         const response = await fetch(`/api/courses/${course.id}/chapters`)
         if (response.ok) {
           const data = await response.json()
-          chaptersData[course.id] = data.chapters || []
+          
+          // ✅ Get user progress for this course
+          const progressResponse = await fetch(`http://localhost:8000/api/user-progress/${user.id}/${course.id}`)
+          if (progressResponse.ok) {
+            const progressData = await progressResponse.json()
+            console.log(`📊 Progress data for course ${course.id}:`, progressData)
+            
+            // ✅ Merge chapter data with progress data
+            const enrichedChapters = data.chapters.map(chapter => {
+              const progress = progressData.progress_records.find(p => p.chapter_id === chapter.id)
+              return {
+                ...chapter,
+                status: progress?.status || 'locked',
+                best_quiz_score: progress?.best_score || 0,
+                quiz_attempts: progress?.attempts || 0
+              }
+            })
+            
+            chaptersData[course.id] = enrichedChapters
+            console.log(`✅ Course ${course.id}: ${enrichedChapters.length} chapters loaded with progress`)
+          } else {
+            console.warn(`⚠️ No progress data for course ${course.id}`)
+            chaptersData[course.id] = data.chapters || []
+          }
         }
       } catch (error) {
-        console.error(`Error loading chapters for course ${course.id}:`, error)
+        console.error(`❌ Error loading chapters for course ${course.id}:`, error)
         chaptersData[course.id] = []
       }
     }
     
     setCourseChapters(chaptersData)
+    console.log('🎯 Final chapters data:', chaptersData)
   }
 
   const calculateStats = () => {
-      const totalCourses = courses.length
-      const totalSessions = chatSessions.length
-      const totalFiles = courses.reduce((sum, course) => sum + (course.file_count || 0), 0)
-      const avgProgress = courses.length > 0 
-        ? Math.round(courses.reduce((sum, course) => sum + (course.progress || 0), 0) / courses.length)
-        : 0
+    const totalCourses = courses.length
+    const totalSessions = chatSessions.length
+    const totalFiles = courses.reduce((sum, course) => sum + (course.file_count || 0), 0)
+    
+    // ✅ Calculate progress from chapter completion
+    let totalChapters = 0
+    let completedChapters = 0
+    
+    Object.values(courseChapters).forEach(chapters => {
+      totalChapters += chapters.length
+      completedChapters += chapters.filter(ch => ch.best_quiz_score >= 70).length
+    })
+    
+    const avgProgress = totalChapters > 0 ? Math.round((completedChapters / totalChapters) * 100) : 0
 
-      // Calculate this week's sessions
-      const oneWeekAgo = new Date()
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-      const thisWeekSessions = chatSessions.filter(session => 
-        new Date(session.created_at) > oneWeekAgo
-      ).length
+    const oneWeekAgo = new Date()
+    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+    const thisWeekSessions = chatSessions.filter(session => 
+      new Date(session.created_at) > oneWeekAgo
+    ).length
 
-      setStats({
-        totalCourses,
-        totalSessions,
-        totalFiles,
-        avgProgress,
-        studyStreak: Math.min(thisWeekSessions, 7),
-        thisWeekSessions
-      })
-    }
+    setStats({
+      totalCourses,
+      totalSessions,
+      totalFiles,
+      avgProgress,
+      studyStreak: Math.min(thisWeekSessions, 7),
+      thisWeekSessions,
+      totalChapters,
+      completedChapters
+    })
+    
+    console.log(`📈 Stats calculated: ${completedChapters}/${totalChapters} chapters completed = ${avgProgress}%`)
+   }
     const startLearningSession = async (courseId, courseName) => {
     try {
       const response = await fetch('/api/chats', {
@@ -278,6 +352,19 @@ export default function DashboardPage() {
           </div>
         </div>
       </header>
+
+      {/* ✅ Quiz Modal */}
+      {showQuiz && quizContext && (
+        <div className="fixed inset-0 z-50">
+          <QuizInterface
+            courseId={quizContext.courseId}
+            chapterId={quizContext.chapterId}
+            userId={user.id}
+            onComplete={handleQuizComplete}
+            onClose={closeQuiz}
+          />
+        </div>
+      )}
 
       <div className="flex">
         {/* Sidebar */}
@@ -567,7 +654,7 @@ export default function DashboardPage() {
                                           </div>
                                           
                                           <div className="flex items-center space-x-1">
-                                            {/* NEW: Chapter Chat Button */}
+                                            {/* Chapter Chat Button */}
                                             {chapter.status !== 'locked' && (
                                               <button
                                                 onClick={(e) => {
@@ -578,6 +665,20 @@ export default function DashboardPage() {
                                                 title={`Chat about ${chapter.title}`}
                                               >
                                                 <MessageCircle className="h-3 w-3" />
+                                              </button>
+                                            )}
+                                            
+                                            {/* ✅ NEW: Quiz Button */}
+                                            {chapter.status !== 'locked' && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  startQuiz(course.id, chapter.id, chapter.title)
+                                                }}
+                                                className="p-1 text-green-600 hover:bg-green-50 rounded transition-colors"
+                                                title={`Take ${chapter.title} Quiz`}
+                                              >
+                                                <Target className="h-3 w-3" />
                                               </button>
                                             )}
                                             
