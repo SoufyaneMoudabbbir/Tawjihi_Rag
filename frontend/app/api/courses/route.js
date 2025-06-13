@@ -13,9 +13,60 @@ export async function POST(request) {
     const semester = formData.get('semester') || ''
     const files = formData.getAll('files')
 
+
     if (!userId || !name) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
+    const AnalysisProgressIndicator = ({ courseId, courseName }) => (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.9 }}
+    animate={{ opacity: 1, scale: 1 }}
+    className="absolute inset-0 bg-white/95 backdrop-blur-sm rounded-2xl flex flex-col items-center justify-center z-10"
+  >
+    <div className="relative">
+      {/* Spinning Icon */}
+      <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-200 border-t-blue-600 mb-4"></div>
+      
+      {/* Brain Icon in Center */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <motion.div
+          animate={{ scale: [1, 1.1, 1] }}
+          transition={{ duration: 2, repeat: Infinity }}
+        >
+          <BookOpen className="h-6 w-6 text-blue-600" />
+        </motion.div>
+      </div>
+    </div>
+    
+    <div className="text-center">
+      <h4 className="font-semibold text-gray-900 mb-1">🧠 AI Analyzing Course</h4>
+      <p className="text-sm text-gray-600 mb-2">Detecting chapters and structure...</p>
+      <p className="text-xs text-gray-500">{courseName}</p>
+    </div>
+
+    {/* Progress Steps */}
+    <div className="mt-4 flex space-x-2">
+      {['📖 Reading', '🧠 Analyzing', '✨ Structuring'].map((step, index) => (
+        <motion.div
+          key={step}
+          initial={{ opacity: 0.3 }}
+          animate={{ 
+            opacity: [0.3, 1, 0.3],
+            scale: [1, 1.05, 1]
+          }}
+          transition={{ 
+            duration: 1.5, 
+            repeat: Infinity,
+            delay: index * 0.5
+          }}
+          className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full"
+        >
+          {step}
+        </motion.div>
+      ))}
+    </div>
+  </motion.div>
+)
 
     const db = await openDb()
 
@@ -117,6 +168,30 @@ export async function POST(request) {
             // Don't fail the course creation if backend is down
         }
         }
+         try {
+          console.log(`🧠 Starting auto-analysis for course ${courseId}`)
+          const analysisResponse = await fetch(`http://localhost:3000/api/courses/${courseId}/analyze`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({ 
+              userId: userId 
+            })
+          })
+          
+          if (analysisResponse.ok) {
+            const analysisResult = await analysisResponse.json()
+            console.log(`✅ Auto-analysis completed for course ${courseId}:`, analysisResult)
+          } else {
+            console.warn(`⚠️ Auto-analysis failed for course ${courseId}`)
+          }
+        } catch (analysisError) {
+          console.error('Auto-analysis error:', analysisError)
+        }
+        // END OF NEW BLOCK ⬆️⬆️⬆️
+        
     }
 
     return NextResponse.json({ 

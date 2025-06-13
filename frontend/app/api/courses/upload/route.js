@@ -68,6 +68,31 @@ export async function POST(request) {
       WHERE id = ?
     `, [courseId, courseId])
 
+        if (uploadedCount > 0) {
+        try {
+            console.log(`🧠 Starting auto-analysis for course ${courseId} after file upload`)
+            const analysisResponse = await fetch(`http://localhost:3000/api/courses/${courseId}/analyze`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            },
+            body: JSON.stringify({ 
+                userId: userId 
+            })
+            })
+            
+            if (analysisResponse.ok) {
+            const analysisResult = await analysisResponse.json()
+            console.log(`✅ Auto-analysis completed for course ${courseId}:`, analysisResult)
+            } else {
+            console.warn(`⚠️ Auto-analysis failed for course ${courseId}`)
+            }
+        } catch (analysisError) {
+            console.error('Auto-analysis error:', analysisError)
+        }
+        }
+
     return NextResponse.json({ 
       success: true, 
       uploadedCount,

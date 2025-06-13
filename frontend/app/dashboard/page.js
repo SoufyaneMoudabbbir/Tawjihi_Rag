@@ -16,7 +16,10 @@ import {
   Calendar,
   Brain,
   Users,
-  Clock
+  Clock,
+   Play,        // NEW
+  Lock,        // NEW
+  CheckCircle  // NEW
 } from "lucide-react"
 import ChatHistorySidebar from "@/components/ChatHistorySidebar"
 
@@ -28,6 +31,7 @@ export default function DashboardPage() {
   const [courses, setCourses] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [showHistory, setShowHistory] = useState(false)
+  const [courseChapters, setCourseChapters] = useState({})
   const [stats, setStats] = useState({
     totalCourses: 0,
     totalSessions: 0,
@@ -54,6 +58,9 @@ export default function DashboardPage() {
       if (coursesResponse.ok) {
         const coursesData = await coursesResponse.json()
         setCourses(coursesData.courses || [])
+        
+        // NEW: Load chapters for each course
+        await loadAllCourseChapters(coursesData.courses || [])
       }
 
       // Load chat sessions
@@ -69,30 +76,99 @@ export default function DashboardPage() {
       setIsLoading(false)
     }
   }
+  const startChapterChat = async (courseId, chapterId, chapterTitle) => {
+    try {
+      const response = await fetch('/api/chats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          courseId: courseId,
+          title: `${chapterTitle} - Chapter Discussion`,
+          chapterContext: chapterId
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        router.push(`/chat/${data.sessionId}`)
+      } else {
+        alert("Failed to start chapter chat")
+      }
+    } catch (error) {
+      console.error("Error starting chapter chat:", error)
+      alert("Error starting chapter chat")
+    }
+  }
+
+  // NEW: Add this function after loadData
+  const loadAllCourseChapters = async (coursesList) => {
+    const chaptersData = {}
+    
+    for (const course of coursesList) {
+      try {
+        const response = await fetch(`/api/courses/${course.id}/chapters`)
+        if (response.ok) {
+          const data = await response.json()
+          chaptersData[course.id] = data.chapters || []
+        }
+      } catch (error) {
+        console.error(`Error loading chapters for course ${course.id}:`, error)
+        chaptersData[course.id] = []
+      }
+    }
+    
+    setCourseChapters(chaptersData)
+  }
 
   const calculateStats = () => {
-    const totalCourses = courses.length
-    const totalSessions = chatSessions.length
-    const totalFiles = courses.reduce((sum, course) => sum + (course.file_count || 0), 0)
-    const avgProgress = courses.length > 0 
-      ? Math.round(courses.reduce((sum, course) => sum + (course.progress || 0), 0) / courses.length)
-      : 0
+      const totalCourses = courses.length
+      const totalSessions = chatSessions.length
+      const totalFiles = courses.reduce((sum, course) => sum + (course.file_count || 0), 0)
+      const avgProgress = courses.length > 0 
+        ? Math.round(courses.reduce((sum, course) => sum + (course.progress || 0), 0) / courses.length)
+        : 0
 
-    // Calculate this week's sessions
-    const oneWeekAgo = new Date()
-    oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
-    const thisWeekSessions = chatSessions.filter(session => 
-      new Date(session.created_at) > oneWeekAgo
-    ).length
+      // Calculate this week's sessions
+      const oneWeekAgo = new Date()
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7)
+      const thisWeekSessions = chatSessions.filter(session => 
+        new Date(session.created_at) > oneWeekAgo
+      ).length
 
-    setStats({
-      totalCourses,
-      totalSessions,
-      totalFiles,
-      avgProgress,
-      studyStreak: Math.min(thisWeekSessions, 7),
-      thisWeekSessions
-    })
+      setStats({
+        totalCourses,
+        totalSessions,
+        totalFiles,
+        avgProgress,
+        studyStreak: Math.min(thisWeekSessions, 7),
+        thisWeekSessions
+      })
+    }
+    const startLearningSession = async (courseId, courseName) => {
+    try {
+      const response = await fetch('/api/chats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          userId: user.id,
+          title: `${courseName} Study Session - ${new Date().toLocaleDateString()}`,
+          courseId: courseId
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        router.push(`/chat/${data.sessionId}`)
+      } else {
+        alert("Failed to start learning session")
+      }
+    } catch (error) {
+      console.error("Error starting session:", error)
+      alert("Error starting learning session")
+    }
   }
 
   useEffect(() => {
@@ -378,43 +454,174 @@ export default function DashboardPage() {
                         View All →
                       </button>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {courses.slice(0, 6).map((course) => (
-                        <motion.div
-                          key={course.id}
-                          whileHover={{ scale: 1.02 }}
-                          className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
-                          onClick={() => router.push(`/courses`)}
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <h4 className="font-medium text-gray-900 line-clamp-2 flex-1">{course.name}</h4>
-                            <div className="text-xs text-gray-500 ml-2 flex items-center">
-                              <FileText className="h-3 w-3 mr-1" />
-                              {course.file_count || 0}
-                            </div>
-                          </div>
-                          
-                          {course.professor && (
-                            <p className="text-sm text-gray-600 mb-3">Prof. {course.professor}</p>
-                          )}
-                          
-                          <div className="flex items-center justify-between text-xs text-gray-500 mb-3">
-                            <span className="flex items-center">
-                              <MessageCircle className="h-3 w-3 mr-1" />
-                              {course.chat_count || 0} sessions
-                            </span>
-                            <span>{course.progress || 0}% complete</span>
-                          </div>
-                          
-                          <div className="w-full bg-gray-200 rounded-full h-1.5">
-                            <div 
-                              className="bg-blue-600 h-1.5 rounded-full transition-all duration-300"
-                              style={{ width: `${course.progress || 0}%` }}
-                            ></div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
+                    {/* Enhanced Course Cards with Chapter Structure */}
+                        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+                          {courses.map((course) => {
+                            const chapters = courseChapters[course.id] || []
+                            const completedChapters = chapters.filter(ch => ch.status === 'completed').length
+                            const totalChapters = chapters.length
+                            const progressPercent = totalChapters > 0 ? (completedChapters / totalChapters) * 100 : 0
+                            const currentChapter = chapters.find(ch => ch.status === 'unlocked' || ch.status === 'quiz_available')
+                            
+                            return (
+                              <motion.div
+                                key={course.id}
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="bg-white rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden border border-gray-100"
+                              >
+                                {/* Course Header */}
+                                <div className="p-6 bg-gradient-to-r from-blue-50 to-indigo-50">
+                                  <div className="flex items-start justify-between mb-4">
+                                    <div className="flex-1">
+                                      <h3 className="text-xl font-bold text-gray-900 mb-1">{course.name}</h3>
+                                      {course.professor && (
+                                        <p className="text-sm text-gray-600">Prof. {course.professor}</p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                      <BookOpen className="h-5 w-5 text-blue-600" />
+                                      <span className="text-sm font-medium text-blue-600">
+                                        {totalChapters} chapters
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Course Progress */}
+                                  {totalChapters > 0 ? (
+                                    <div className="space-y-3">
+                                      <div className="flex justify-between text-sm">
+                                        <span className="text-gray-600">Overall Progress</span>
+                                        <span className="font-semibold text-gray-900">
+                                          {Math.round(progressPercent)}%
+                                        </span>
+                                      </div>
+                                      <div className="w-full bg-gray-200 rounded-full h-3">
+                                        <div 
+                                          className="bg-gradient-to-r from-blue-500 to-indigo-600 h-3 rounded-full transition-all duration-500"
+                                          style={{ width: `${progressPercent}%` }}
+                                        />
+                                      </div>
+                                      
+                                      {/* Current Chapter Status */}
+                                      {currentChapter ? (
+                                        <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-blue-100">
+                                          <div className="flex items-center space-x-2">
+                                            <Target className="h-4 w-4 text-blue-600" />
+                                            <span className="text-sm font-medium text-gray-900">
+                                              Chapter {currentChapter.chapter_number}: {currentChapter.title}
+                                            </span>
+                                          </div>
+                                          {currentChapter.status === 'quiz_available' && (
+                                            <span className="px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                                              Quiz Ready
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : completedChapters === totalChapters ? (
+                                        <div className="flex items-center justify-center p-3 bg-green-50 rounded-lg border border-green-200">
+                                          <Award className="h-4 w-4 text-green-600 mr-2" />
+                                          <span className="text-sm font-medium text-green-700">Course Completed! 🎉</span>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                          <span className="text-sm text-gray-600">Ready to start learning</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="text-center py-4">
+                                      <Brain className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                                      <p className="text-sm text-gray-500">Course structure being analyzed...</p>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Chapter List Preview */}
+                                {totalChapters > 0 && (
+                                  <div className="px-6 pb-4">
+                                    <h4 className="text-sm font-semibold text-gray-700 mb-3">Chapters</h4>
+                                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                                      {chapters.slice(0, 4).map((chapter) => (
+                                        <div 
+                                          key={chapter.id}
+                                          className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50"
+                                        >
+                                          <div className="flex items-center space-x-3">
+                                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
+                                              chapter.status === 'completed' 
+                                                ? 'bg-green-100 text-green-700' 
+                                                : chapter.status === 'quiz_available'
+                                                ? 'bg-yellow-100 text-yellow-700'
+                                                : chapter.status === 'unlocked'
+                                                ? 'bg-blue-100 text-blue-700'
+                                                : 'bg-gray-100 text-gray-500'
+                                            }`}>
+                                              {chapter.status === 'completed' ? '✓' : chapter.chapter_number}
+                                            </div>
+                                            <span className={`text-sm ${
+                                              chapter.status === 'locked' ? 'text-gray-400' : 'text-gray-700'
+                                            }`}>
+                                              {chapter.title}
+                                            </span>
+                                          </div>
+                                          
+                                          <div className="flex items-center space-x-1">
+                                            {/* NEW: Chapter Chat Button */}
+                                            {chapter.status !== 'locked' && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation()
+                                                  startChapterChat(course.id, chapter.id, chapter.title)
+                                                }}
+                                                className="p-1 text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                                title={`Chat about ${chapter.title}`}
+                                              >
+                                                <MessageCircle className="h-3 w-3" />
+                                              </button>
+                                            )}
+                                            
+                                            {chapter.status === 'locked' && (
+                                              <Lock className="h-3 w-3 text-gray-400" />
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                      {chapters.length > 4 && (
+                                        <p className="text-xs text-gray-500 text-center pt-1">
+                                          +{chapters.length - 4} more chapters
+                                        </p>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Action Buttons */}
+                                <div className="px-6 pb-6">
+                                  <div className="flex space-x-3">
+                                    <button
+                                      onClick={() => startLearningSession(course.id, course.name)}
+                                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2"
+                                    >
+                                      <Play className="h-4 w-4" />
+                                      <span>Continue Learning</span>
+                                    </button>
+                                    
+                                    {totalChapters > 0 && (
+                                      <button
+                                        onClick={() => window.open(`/courses/${course.id}/chapters`, '_blank')}
+                                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                                        title="View Chapter Details"
+                                      >
+                                        <BookOpen className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )
+                          })}
+                        </div>
                   </motion.div>
                 )}
 
@@ -505,5 +712,8 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+
+    
   )
+  
 }

@@ -33,6 +33,7 @@ export default function CoursesPage() {
     semester: "",
     files: []
   })
+  
 
   useEffect(() => {
     if (isLoaded && user) {

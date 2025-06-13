@@ -75,6 +75,7 @@ export async function POST(request) {
   }
 }
 
+
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -86,53 +87,6 @@ export async function GET(request) {
     }
 
     const db = await openDb()
-
-    // Force table creation
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS chat_sessions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        course_id INTEGER,
-        title TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE SET NULL
-      )
-    `)
-
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS chat_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id INTEGER NOT NULL,
-        type TEXT NOT NULL,
-        content TEXT NOT NULL,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
-      )
-    `)
-
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS courses (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        description TEXT,
-        professor TEXT,
-        semester TEXT,
-        status TEXT DEFAULT 'active',
-        file_count INTEGER DEFAULT 0,
-        chat_count INTEGER DEFAULT 0,
-        progress INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        last_accessed DATETIME
-      )
-    `)
-
-    // Create indexes
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)`)
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_course_id ON chat_sessions(course_id)`)
-    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)`)
 
     let query = `
       SELECT 
