@@ -154,6 +154,8 @@ class EducationalRAG:
                 
         except Exception as e:
             logger.error(f"Error loading course {course_id}: {e}")
+            
+    
     
     
     def load_course_materials(self, course_id):
@@ -1105,13 +1107,13 @@ Provide a helpful educational response using the course materials."""
             logger.error(f"Error parsing chapter JSON: {e}")
             return {"chapters": []}
 
-    def save_chapter_structure(self, course_id, chapter_analysis, text_by_pages):
-        """Save detected chapters to database"""
+    def save_chapter_structure(self, course_id, chapter_analysis, text_by_pages, user_id):
+        """Save detected chapters to database and initialize user progress"""
         if not self.conn or not chapter_analysis.get('chapters'):
             return
             
         try:
-             # Ensure tables exist first
+            # Ensure tables exist first
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS course_chapters (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1140,6 +1142,27 @@ Provide a helpful educational response using the course materials."""
                     FOREIGN KEY (chapter_id) REFERENCES course_chapters (id) ON DELETE CASCADE
                 )
             """)
+
+            # ✅ Ensure user_chapter_progress table exists
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS user_chapter_progress (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT NOT NULL,
+                    course_id INTEGER NOT NULL,
+                    chapter_id INTEGER NOT NULL,
+                    status TEXT DEFAULT 'locked',
+                    best_quiz_score INTEGER DEFAULT 0,
+                    quiz_attempts INTEGER DEFAULT 0,
+                    last_attempt_at DATETIME,
+                    completed_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, course_id, chapter_id),
+                    FOREIGN KEY (course_id) REFERENCES courses (id),
+                    FOREIGN KEY (chapter_id) REFERENCES course_chapters (id)
+                )
+            """)
+            
             for chapter in chapter_analysis['chapters']:
                 # Extract chapter content from pages
                 start_page = chapter.get('start_page', 1) - 1  # Convert to 0-based index
@@ -1171,18 +1194,25 @@ Provide a helpful educational response using the course materials."""
                     INSERT INTO chapter_content 
                     (chapter_id, content_type, content_text, page_reference)
                     VALUES (?, ?, ?, ?)
-                """, (
-                    chapter_id,
-                    'text',
-                    chapter_content[:5000],  # Limit content size
-                    f"Pages {chapter.get('start_page', 1)}-{chapter.get('end_page', 1)}"
-                ))
-            
+                """, (chapter_id, "main_content", chapter_content, f"Pages {start_page+1}-{end_page+1}"))
+                
+                # ✅ NEW: Initialize user progress for this chapter
+                chapter_status = 'unlocked' if chapter.get('chapter_number', 1) == 1 else 'locked'
+                self.conn.execute("""
+                    INSERT INTO user_chapter_progress 
+                    (user_id, course_id, chapter_id, status, best_quiz_score, quiz_attempts)
+                    VALUES (?, ?, ?, ?, 0, 0)
+                """, (user_id, course_id, chapter_id, chapter_status))
+                
+                logger.info(f"✅ Created chapter {chapter_id} ({chapter.get('title', 'Untitled')}) with status: {chapter_status}")
+                
             self.conn.commit()
-            logger.info(f"Saved {len(chapter_analysis['chapters'])} chapters for course {course_id}")
+            logger.info(f"Saved {len(chapter_analysis['chapters'])} chapters for course {course_id} and initialized progress for user {user_id}")
             
         except Exception as e:
-            logger.error(f"Error saving chapters: {e}")
+            logger.error(f"Error saving chapter structure: {e}")
+            if self.conn:
+                self.conn.rollback()
 
     def get_course_files(self, course_id):
         """Get file paths for a course"""
@@ -1245,11 +1275,7 @@ Provide a helpful educational response using the course materials."""
             
             # Multiple search queries to get different aspects of the chapter
             search_queries = [
-                "key concepts definitions terminology",
-                "examples applications processes methods", 
-                "important principles theory fundamentals",
-                "procedures techniques algorithms steps",
-                "summary overview main points concepts"
+                "key concepts definitions terminology examples applications processes methods important principles theory fundamentals procedures techniques algorithms steps summary overview main points concepts"
             ]
 
             for query in search_queries:
@@ -1375,7 +1401,7 @@ Provide a helpful educational response using the course materials."""
                 'https://api.deepseek.com/v1/chat/completions',
                 headers=headers,
                 json=data,
-                timeout=45
+                timeout=60
             )
             
             if response.status_code == 200:
@@ -1478,10 +1504,10 @@ Provide a helpful educational response using the course materials."""
             logger.error(f"Error validating quiz structure: {e}")
             return False    
 
-    def analyze_document_structure(self, file_path, course_id):
+    def analyze_document_structure(self, file_path, course_id, user_id):
         """Main function to analyze PDF and create chapter structure"""
         try:
-            logger.info(f"Analyzing document structure for course {course_id}: {file_path}")
+            logger.info(f"Analyzing document structure for course {course_id}, user {user_id}: {file_path}")
             
             # Extract text with page information
             text_by_pages = self.extract_pdf_with_pages(file_path)
@@ -1494,8 +1520,8 @@ Provide a helpful educational response using the course materials."""
             # Use AI to detect chapters
             chapter_analysis = self.detect_chapters_with_ai(full_text)
             
-            # Save to database
-            self.save_chapter_structure(course_id, chapter_analysis, text_by_pages)
+            # Save to database with user_id for progress initialization
+            self.save_chapter_structure(course_id, chapter_analysis, text_by_pages, user_id)
             
             return chapter_analysis
             
@@ -1552,6 +1578,152 @@ Provide a helpful educational response using the course materials."""
         
         # Send done signal
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        
+    def get_chapter_type(self, chapter_title: str, content_summary: str) -> str:
+        """Use AI to get a friendly description of the chapter type (multilingual)"""
+        
+        prompt = f"""
+        Analyze this chapter and categorize its type for a friendly user message.
+
+        Chapter Title: {chapter_title}
+        Content Summary: {content_summary}
+
+        Possible categories:
+        - "Acknowledgments" - for thanks, credits, appreciation
+        - "References" - for bibliography, citations, sources
+        - "Administrative" - for preface, copyright, about author
+        - "Index/Glossary" - for reference materials
+        - "Appendix" - for supplementary materials
+        - "Educational Content" - for actual course material
+
+        Instructions:
+        - Analyze regardless of language
+        - Return only ONE category name
+        - Be concise and clear
+
+        Category:"""
+        
+        try:
+            response = self.generate_simple_ai_response(prompt)
+            category = response.strip()
+            
+            logger.info(f"🤖 AI Category for '{chapter_title}': {category}")
+            return category
+            
+        except Exception as e:
+            logger.error(f"Error in AI category analysis: {e}")
+            return "Supplementary Material"
+    
+    def generate_simple_ai_response(self, prompt: str) -> str:
+        """Make a simple, fast AI call for content analysis"""
+        
+        try:
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                "model": "deepseek-chat",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 10,
+                "top_p": 0.9
+            }
+            
+            logger.info("🤖 Making quick AI call for chapter analysis...")
+            
+            response = requests.post(
+                'https://api.deepseek.com/v1/chat/completions',
+                headers=headers,
+                json=data,
+                timeout=20  # ✅ Increase timeout from 15 to 20 seconds
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                ai_response = result['choices'][0]['message']['content'].strip()
+                logger.info(f"📥 AI Analysis Response: {ai_response}")
+                return ai_response
+            else:
+                logger.error(f"AI API error: {response.status_code}")
+                return "TIMEOUT"  # ✅ Return special code instead of TRUE
+                
+        except Exception as e:
+            logger.error(f"Error in simple AI call: {e}")
+            return "TIMEOUT"  # ✅ Return special code instead of TRUE
+    
+    def fallback_keyword_analysis(self, chapter_title: str, content_summary: str) -> bool:
+        """Fallback keyword analysis if AI fails"""
+        
+        text_to_analyze = f"{chapter_title.lower()} {content_summary.lower()}"
+        
+        # Common non-educational keywords in multiple languages
+        non_educational_keywords = [
+            # English
+            'acknowledgment', 'acknowledgement', 'thanks', 'gratitude', 'reference', 
+            'bibliography', 'citation', 'index', 'glossary', 'preface', 'foreword',
+            
+            # French
+            'remerciement', 'remerciements', 'bibliographie', 'références',
+            
+            # Spanish  
+            'agradecimiento', 'agradecimientos', 'referencias', 'bibliografía',
+            
+            # German
+            'danksagung', 'literatur', 'quellenverzeichnis',
+            
+            # Common patterns
+            'about the author', 'table of contents', 'copyright'
+        ]
+        
+        for keyword in non_educational_keywords:
+            if keyword in text_to_analyze:
+                logger.info(f"🔍 Fallback: Found non-educational keyword '{keyword}'")
+                return False
+        
+        logger.info("🔍 Fallback: Defaulting to educational content")
+        return True
+        
+    def is_chapter_suitable_for_quiz_simple(self, chapter_title: str, content_summary: str) -> bool:
+        """Simple AI check if chapter needs quiz"""
+        
+        prompt = f"""
+        Analyze this chapter and determine if it contains EDUCATIONAL CONTENT suitable for creating quiz questions.
+        
+        Chapter Title: {chapter_title}
+        Content Summary: {content_summary}
+        
+        NON-EDUCATIONAL chapters (return FALSE):
+        - Acknowledgments/Thanks/Remerciements in any language
+        - References/Bibliography 
+        - Index/Glossary
+        - About the Author
+        - Preface/Foreword
+        - Summary/Résumé sections
+        
+        EDUCATIONAL chapters (return TRUE):
+        - Subject matter with concepts, theories, methods
+        - Technical content with procedures
+        - Any content students should learn and be tested on
+        
+        Respond ONLY with: TRUE or FALSE
+        """
+        
+        try:
+            response = self.generate_simple_ai_response(prompt)
+            is_educational = "TRUE" in response.upper()
+            logger.info(f"🤖 Simple AI check for '{chapter_title}': {'Educational' if is_educational else 'Skip quiz'}")
+            return is_educational
+        except:
+            # If AI fails, use simple keyword check
+            text = f"{chapter_title.lower()} {content_summary.lower()}"
+            skip_keywords = ['remerciement', 'acknowledgment', 'reference', 'bibliography', 'résumé', 'summary', 'index']
+            should_skip = any(keyword in text for keyword in skip_keywords)
+            logger.info(f"🔍 Fallback keyword check for '{chapter_title}': {'Skip quiz' if should_skip else 'Educational'}")
+            return not should_skip
     
     def chat(self, question, course_id=None, user_id=None, user_profile=None):
         """Non-streaming chat function"""
@@ -1706,7 +1878,7 @@ async def analyze_course_structure(request: dict):
         if not course_id or not user_id:
             raise HTTPException(status_code=400, detail="Missing course_id or user_id")
         
-        logger.info(f"Starting course analysis for course {course_id}")
+        logger.info(f"Starting course analysis for course {course_id}, user {user_id}")
         
         # Ensure chatbot is initialized
         if not chatbot:
@@ -1730,7 +1902,8 @@ async def analyze_course_structure(request: dict):
         for file_info in course_files:
             try:
                 logger.info(f"Analyzing file: {file_info['original_name']}")
-                analysis = chatbot.analyze_document_structure(file_info['file_path'], course_id)
+                # ✅ Pass user_id to analysis function
+                analysis = chatbot.analyze_document_structure(file_info['file_path'], course_id, user_id)
                 
                 if analysis and analysis.get('chapters'):
                     total_chapters += len(analysis['chapters'])
@@ -1747,15 +1920,14 @@ async def analyze_course_structure(request: dict):
             "success": True, 
             "message": f"Course analysis completed. {total_chapters} chapters detected from {processed_files} files.",
             "chapters_created": total_chapters,
-            "files_processed": processed_files,
-            "total_files": len(course_files)
+            "processed_files": processed_files,
+            "user_id": user_id,
+            "course_id": course_id
         }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Error in course analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")   
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: QuestionRequest):
@@ -1944,6 +2116,9 @@ async def generate_and_store_quiz(course_id: int, chapter_id: int):
     except Exception as e:
         logger.error(f"Error generating and storing quiz: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+    
 
 @app.get("/api/quiz/{course_id}/{chapter_id}")
 async def get_chapter_quiz(course_id: int, chapter_id: int, user_id: str):
@@ -1968,10 +2143,8 @@ async def get_chapter_quiz(course_id: int, chapter_id: int, user_id: str):
         
         if existing_quiz:
             # ✅ Existing quiz found
-            quiz_id = existing_quiz[0]  # Define quiz_id here
+            quiz_id = existing_quiz[0]
             quiz_data = json.loads(existing_quiz[1])
-            
-            # ✅ Add quiz_id to quiz_data for frontend
             quiz_data['quiz_id'] = quiz_id
             
             logger.info(f"📚 Retrieved existing quiz {quiz_id} for chapter {chapter_id}")
@@ -2000,10 +2173,8 @@ async def get_chapter_quiz(course_id: int, chapter_id: int, user_id: str):
                 len(quiz_data.get('questions', []))
             ))
             
-            quiz_id = cursor.lastrowid  # Define quiz_id here
+            quiz_id = cursor.lastrowid
             chatbot.conn.commit()
-            
-            # ✅ Add quiz_id to quiz_data for frontend
             quiz_data['quiz_id'] = quiz_id
             
             logger.info(f"🆕 Generated and stored new quiz {quiz_id} for chapter {chapter_id}")
