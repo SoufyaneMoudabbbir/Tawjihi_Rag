@@ -22,3 +22,15 @@ spacy>=3.6.0,<4.0.0
 
 # Development
 python-dotenv>=1.0.0
+
+# PDF processing
+PyPDF2>=3.0.0
+
+# Additional dependencies
+slowapi>=0.1.9  # Rate limiting
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+httpx>=0.24.0  # For testing async endpoints

@@ -19,16 +19,53 @@ out/
 .env
 .env.local
 .env.*.local
+.env.production
+.env.development
 
 # ---- Logs ----
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
 
 # ---- Editor folders ----
 .vscode/
 .idea/
 
-# ---- Others ----
-*.swp
+# ---- Database files (IMPORTANT: Never commit databases) ----
+*.sqlite
+*.sqlite3
+database.sqlite
+*.db
+
+# ---- Upload files (User data) ----
+uploads/
+frontend/uploads/
+
+# ---- Test coverage ----
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.jest/
+
+# ---- Build artifacts ----
+dist/
+build/
+*.egg-info/
+
+# ---- OS files ----
 .DS_Store
+*.swp
+Thumbs.db
+
+# ---- IDE ----
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# ---- Temporary files ----
+tmp/
+temp/
+*.tmp
