@@ -4,8 +4,88 @@ import { openDb } from "@/lib/db"
 export async function POST(request) {
   try {
     const db = await openDb()
-    
-    // Create the new chapter-related tables
+
+    // ==============================
+    // CORE TABLES
+    // ==============================
+
+    // 1. Courses table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS courses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        description TEXT,
+        professor TEXT,
+        semester TEXT,
+        status TEXT DEFAULT 'active',
+        file_count INTEGER DEFAULT 0,
+        chat_count INTEGER DEFAULT 0,
+        progress INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_accessed DATETIME
+      )
+    `)
+
+    // 2. Course files table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS course_files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        course_id INTEGER NOT NULL,
+        filename TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER,
+        upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        processed BOOLEAN DEFAULT FALSE,
+        FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE CASCADE
+      )
+    `)
+
+    // 3. Chat sessions table (with session_type column)
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        course_id INTEGER,
+        title TEXT NOT NULL,
+        session_type TEXT DEFAULT 'general',
+        metadata TEXT DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (course_id) REFERENCES courses (id) ON DELETE SET NULL
+      )
+    `)
+
+    // 4. Chat messages table
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        content TEXT NOT NULL,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES chat_sessions (id) ON DELETE CASCADE
+      )
+    `)
+
+    // 5. User responses table (for questionnaires)
+    await db.exec(`
+      CREATE TABLE IF NOT EXISTS user_responses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL,
+        responses TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `)
+
+    // ==============================
+    // CHAPTER-RELATED TABLES
+    // ==============================
+
+    // 6. Course chapters table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS course_chapters (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,6 +102,7 @@ export async function POST(request) {
       )
     `)
 
+    // 7. Chapter content table
     await db.exec(`
       CREATE TABLE IF NOT EXISTS chapter_content (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,8 +116,9 @@ export async function POST(request) {
       )
     `)
 
+    // 8. Chapter quizzes table
     await db.exec(`
-      CREATE TABLE IF NOT EXISTS chapter_quizzes_11 (
+      CREATE TABLE IF NOT EXISTS chapter_quizzes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         chapter_id INTEGER NOT NULL,
         quiz_data TEXT NOT NULL,
@@ -46,14 +128,51 @@ export async function POST(request) {
       )
     `)
 
-    // Create indexes
+    // ==============================
+    // INDEXES FOR PERFORMANCE
+    // ==============================
+
+    // Courses indexes
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_courses_user_id ON courses(user_id)`)
+
+    // Course files indexes
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_course_files_course_id ON course_files(course_id)`)
+
+    // Chat sessions indexes
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_user_id ON chat_sessions(user_id)`)
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_course_id ON chat_sessions(course_id)`)
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_type ON chat_sessions(session_type)`)
+
+    // Chat messages indexes
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id)`)
+
+    // User responses indexes
+    await db.exec(`CREATE INDEX IF NOT EXISTS idx_user_responses_user_id ON user_responses(user_id)`)
+
+    // Chapter indexes
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_course_chapters_course_id ON course_chapters(course_id)`)
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chapter_content_chapter_id ON chapter_content(chapter_id)`)
     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chapter_quizzes_chapter_id ON chapter_quizzes(chapter_id)`)
 
-    return NextResponse.json({ success: true, message: "Database migrated successfully" })
+    return NextResponse.json({
+      success: true,
+      message: "Database migrated successfully",
+      tables_created: [
+        "courses",
+        "course_files",
+        "chat_sessions",
+        "chat_messages",
+        "user_responses",
+        "course_chapters",
+        "chapter_content",
+        "chapter_quizzes"
+      ]
+    })
   } catch (error) {
     console.error("Migration error:", error)
-    return NextResponse.json({ error: "Migration failed" }, { status: 500 })
+    return NextResponse.json({
+      error: "Migration failed",
+      details: error.message
+    }, { status: 500 })
   }
 }
