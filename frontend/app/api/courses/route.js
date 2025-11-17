@@ -108,14 +108,17 @@ export async function POST(request) {
       // Update course file count
       await db.run("UPDATE courses SET file_count = ? WHERE id = ?", [fileCount, courseId])
       if (fileCount > 0) {
+        // ✅ FIXED: Use environment variables instead of hardcoded URLs
+        const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+
         try {
-            const response = await fetch(`http://localhost:8000/courses/${courseId}/load`, {
+            const response = await fetch(`${BACKEND_URL}/courses/${courseId}/load`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
             }
             })
-            
+
             if (response.ok) {
             const result = await response.json()
             console.log(`Course ${courseId} materials processed:`, result)
@@ -129,17 +132,18 @@ export async function POST(request) {
         }
          try {
           console.log(`🧠 Starting auto-analysis for course ${courseId}`)
-          const analysisResponse = await fetch(`http://localhost:3000/api/courses/${courseId}/analyze`, {
+          // ✅ FIXED: Use relative URL for internal API calls (Next.js API routes)
+          const analysisResponse = await fetch(`/api/courses/${courseId}/analyze`, {
             method: 'POST',
-            headers: { 
+            headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json'
             },
-            body: JSON.stringify({ 
-              userId: userId 
+            body: JSON.stringify({
+              userId: userId
             })
           })
-          
+
           if (analysisResponse.ok) {
             const analysisResult = await analysisResponse.json()
             console.log(`✅ Auto-analysis completed for course ${courseId}:`, analysisResult)
